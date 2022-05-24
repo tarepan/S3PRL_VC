@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 import numpy as np
-import torch
+from torch import Tensor, tensor, from_numpy, maximum # pylint: disable=no-name-in-module
 import torch.nn as nn
 import pytorch_lightning as pl
 from omegaconf import MISSING
@@ -42,8 +42,8 @@ class Loss(nn.Module):
                 .scale_::np.ndarray - frequencyBand-wise standard deviation
         """
         # buffer is part of state_dict (saved by PyTorch functions)
-        self.register_buffer("target_mean", torch.from_numpy(stats.mean_).float())
-        self.register_buffer("target_scale", torch.from_numpy(stats.scale_).float())
+        self.register_buffer("target_mean", from_numpy(stats.mean_).float())
+        self.register_buffer("target_scale", from_numpy(stats.scale_).float())
 
     def normalize(self, x):
         return (x - self.target_mean) / self.target_scale
@@ -130,7 +130,7 @@ class Taco2ARVC(pl.LightningModule):
         # Utterance embedding model for inference
         self.uttr_encoder = None
 
-    def forward(self,
+    def forward(self, # pylint: disable=arguments-differ
                 split,
                 input_features,
                 acoustic_features,
@@ -138,8 +138,7 @@ class Taco2ARVC(pl.LightningModule):
                 acoustic_feature_lengths,
                 spk_embs,
                 vc_ids,
-                records,
-                **kwargs):
+                records):
         """(PL API) Forward a batch.
 
         Args:
@@ -153,7 +152,8 @@ class Taco2ARVC(pl.LightningModule):
         """
         pass
 
-    def training_step(self, batch, batch_idx: int):
+    # Typing of PL step API is poor. It is typed as `(self, *args, **kwargs)`.
+    def training_step(self, batch): # pylint: disable=arguments-differ
         """(PL API) Forward a batch.
 
         Args:
@@ -188,13 +188,13 @@ class Taco2ARVC(pl.LightningModule):
         self.log("loss", loss)
         return {"loss": loss}
 
-    def validation_step(self, batch, batch_idx: int):
+    def validation_step(self, batch): # pylint: disable=arguments-differ
         """(PL API) Validate a batch.
         """
 
         input_features, input_feature_lengths, \
             acoustic_features_padded, acoustic_feature_lengths, \
-            spk_embs, device, records = batch
+            spk_embs, device = batch
 
         predicted_features, predicted_feature_lengths = self.model(
             input_features,
@@ -208,9 +208,8 @@ class Taco2ARVC(pl.LightningModule):
                             acoustic_feature_lengths,
                             device)
         self.log("val_loss", loss)
-        # todo: Synthesis
-        pass
 
+        # todo: Synthesis
         # [PyTorch](https://pytorch.org/docs/stable/tensorboard.html#torch.
         #     utils.tensorboard.writer.SummaryWriter.add_audio)
         # self.logger.experiment.add_audio(
@@ -220,9 +219,13 @@ class Taco2ARVC(pl.LightningModule):
         #     sample_rate=self._conf.sampling_rate,
         # )
 
-        return {"val_loss": loss}
+        # return anything_for_`validation_epoch_end`
 
-    def predict_step(self, batch, batch_idx: int = 0):
+    # def test_step(self, batch, batch_idx: int):
+    #     """(PL API) Test a batch. If not provided, test_step == validation_step."""
+    #     return anything_for_`test_epoch_end`
+
+    def predict_step(self, batch): # pylint: disable=arguments-differ
         """(PL API) Generate a mel-spectrogram from a unit sequence and speaker embedding.
         Args:
             batch
@@ -246,7 +249,9 @@ class Taco2ARVC(pl.LightningModule):
         def lr_lambda(now: int) -> float:
             """0@0 ---> (linear) ---> 1@`warmup_steps` ---> (linear) ---> 0@`total_steps`"""
             is_warmup = now < warmup_steps
-            return (now / warmup_steps) if is_warmup else (total_steps - now) / (total_steps - warmup_steps)
+            increasing = now / warmup_steps
+            decreasing = (total_steps - now) / (total_steps - warmup_steps)
+            return increasing if is_warmup else decreasing
 
         sched = {
             "scheduler": LambdaLR(optim, lr_lambda),
@@ -258,7 +263,7 @@ class Taco2ARVC(pl.LightningModule):
             "lr_scheduler": sched,
         }
 
-    def mel_taco_to_rnnms(self, log_amp_bel: torch.Tensor) -> torch.Tensor:
+    def mel_taco_to_rnnms(self, log_amp_bel: Tensor) -> Tensor:
         """
         Convert TacoVC-compatible mel-spectrogram to RNNMS-compatible one.
 
@@ -267,13 +272,15 @@ class Taco2ARVC(pl.LightningModule):
         Returns:
             rnnms_mel::[Batch==1, TimeMel, Freq] - scaled(1/80)-log(ref=20dB, minrel=-80dB)-power
         """
-        log_amp_dB = 10. * log_amp_bel # log(ref=0dB, min=-200dB)-amplitude [dB]
-        log_pow = 2. * log_amp_dB      # log(S^2/1) = 2*log(S/1) ==> 10*log(S^2/1) [dB] = 10*2*log(S/1) = 2*(10*log(S/1))
+        # log(ref=0dB, min=-200dB)-amplitude [dB]
+        log_amp_db = 10. * log_amp_bel
+        # log(S^2/1) = 2*log(S/1) ==> 10*log(S^2/1) [dB] = 10*2*log(S/1) = 2*(10*log(S/1))
+        log_pow = 2. * log_amp_db
         log_pow_ref20 = log_pow - 20.
-        log_pow_ref20_minrel80 = torch.maximum(torch.tensor([-80.]), log_pow_ref20)
+        log_pow_ref20_minrel80 = maximum(tensor([-80.]), log_pow_ref20)
         return log_pow_ref20_minrel80 / 80.
 
-    def wavs2emb(self, waves: List[np.ndarray]) -> torch.Tensor:
+    def wavs2emb(self, waves: List[np.ndarray]) -> Tensor:
         """Convert waveforms into an averaged embedding.
 
         Args:
@@ -289,9 +296,5 @@ class Taco2ARVC(pl.LightningModule):
         # Calculate an average of utterance embeddings
         processed_waves = [preprocess_wav(wave) for wave in waves]
         ave_emb = self.uttr_encoder.embed_speaker(processed_waves)
-        
-        return torch.unsqueeze(torch.from_numpy(ave_emb), 0)
 
-    @property
-    def device(self):
-        return next(self.parameters()).device
+        return from_numpy(ave_emb).unsqueeze(dim=0)
