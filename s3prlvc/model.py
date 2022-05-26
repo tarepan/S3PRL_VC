@@ -4,12 +4,11 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 import numpy as np
-from torch import Tensor, tensor, from_numpy, maximum # pylint: disable=no-name-in-module
-import torch.nn as nn
-import pytorch_lightning as pl
-from omegaconf import MISSING
+from torch import nn, Tensor, tensor, from_numpy, maximum # pylint: disable=no-name-in-module
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
+import pytorch_lightning as pl
+from omegaconf import MISSING
 from resemblyzer import preprocess_wav, VoiceEncoder
 
 from .networks.taco2ar import Taco2ARNet, ConfTaco2ARNet
