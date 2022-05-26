@@ -16,7 +16,6 @@
       "terminal.integrated.shellArgs.linux": [
         "-l"
       ],
-      "python.pythonPath": "/usr/local/bin/python",
       "python.linting.enabled": true,
       "python.linting.pylintEnabled": true,
       "python.formatting.autopep8Path": "/usr/local/py-utils/bin/autopep8",
