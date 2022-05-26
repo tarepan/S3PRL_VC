@@ -34,6 +34,7 @@
     "forwardPorts": [
       9000
     ],
-    "postCreateCommand": "~/.poetry/bin/poetry install",
+    // poetry in Dockerfile automatically update env file, but it is not yet reloaded on shell. So, we choose direct poetry binary call.
+    "postCreateCommand": "$HOME/.local/bin/poetry install",
     "remoteUser": "root"
   }
