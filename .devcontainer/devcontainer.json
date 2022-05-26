@@ -1,13 +1,16 @@
-// from https://github.com/microsoft/vscode-remote-try-python 2020-10-01
-// For format details, see https://aka.ms/vscode-remote/devcontainer.json or this file's README at:
-// https://github.com/microsoft/vscode-dev-containers/tree/v0.134.0/containers/python-3
 {
-    "name": "Python 3",
+    "name": "ML PyTorch",
+
+    // Container origin
+    //// from pre-build image
+    // "image": "xxx/yyy",
+    //// from Dockerfile
     "build": {
       "dockerfile": "Dockerfile",
       "context": ".."
     },
-    // Set *default* container specific settings.json values on container create.
+
+    // VS Code specific properties
     "settings": {
       "terminal.integrated.shell.linux": "/bin/bash",
       "terminal.integrated.shellArgs.linux": [
@@ -26,15 +29,14 @@
       "python.linting.pydocstylePath": "/usr/local/py-utils/bin/pydocstyle",
       "python.linting.pylintPath": "/usr/local/py-utils/bin/pylint"
     },
-    // Add the IDs of extensions you want installed when the container is created.
     "extensions": [
-      "ms-python.python",
-      "ms-python.vscode-pylance"
+      // It install Pylance (`ms-python.vscode-pylance`) automatically
+      "ms-python.python"
     ],
-    "forwardPorts": [
-      9000
-    ],
+
+    // Post processings
     // poetry in Dockerfile automatically update env file, but it is not yet reloaded on shell. So, we choose direct poetry binary call.
     "postCreateCommand": "$HOME/.local/bin/poetry install",
+
     "remoteUser": "root"
   }
