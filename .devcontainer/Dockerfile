@@ -13,4 +13,4 @@ RUN pip3 --disable-pip-version-check --no-cache-dir install torch==1.11.0+cpu to
 
 # package dependency manager `poetry` without environment isolation (It is a job of Docker.)
 ENV POETRY_VIRTUALENVS_CREATE=false
-RUN curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py | python -
+RUN curl -sSL https://install.python-poetry.org | python3 -
