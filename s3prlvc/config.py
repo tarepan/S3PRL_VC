@@ -1,14 +1,17 @@
-"""Global configuration"""
+"""S3PRL-VC global configurations"""
 
 
-from typing import Callable, TypeVar, Optional
+from typing import Optional
 from dataclasses import dataclass
 
-from omegaconf import OmegaConf, SCMode, MISSING
+from omegaconf import MISSING
+
+from .config_gen import generate_conf_loader
 
 from .train import ConfTrain
 from .model import ConfTaco2ARVC
 from .data.datamodule import ConfWavMelEmbVcData
+
 
 CONF_DEFAULT_STR = """
 sr_for_unit: 16000
@@ -129,45 +132,7 @@ class ConfGlobal:
     path_extend_conf: Optional[str] = MISSING
 
 
-T = TypeVar('T')
-def gen_load_conf() -> Callable[[], T]:
-    """Generate 'Load configuration type-safely' function.
-    Priority: CLI args > CLI-specified config yaml > Default
-    """
-
-    def generated_load_conf() -> T:
-        default = OmegaConf.create(CONF_DEFAULT_STR)
-        cli = OmegaConf.from_cli()
-        extends_path = cli.get("path_extend_conf", None)
-        if extends_path:
-            extends = OmegaConf.load(extends_path)
-            conf_final = OmegaConf.merge(default, extends, cli)
-        else:
-            conf_final = OmegaConf.merge(default, cli)
-        OmegaConf.resolve(conf_final)
-        conf_structured = OmegaConf.merge(
-            OmegaConf.structured(ConfGlobal),
-            conf_final
-        )
-
-        # Design Note -- OmegaConf instance v.s. DataClass instance --
-        #   OmegaConf instance has runtime overhead in exchange for type safety.
-        #   Configuration is constructed/finalized in early stage,
-        #   so config is eternally valid after validation in last step of early stage.
-        #   As a result, we can safely convert OmegaConf to DataClass after final validation.
-        #   This prevent (unnecessary) runtime overhead in later stage.
-        #
-        #   One demerit: No "freeze" mechanism in instantiated dataclass.
-        #   If OmegaConf, we have `OmegaConf.set_readonly(conf_final, True)`
-
-        # [todo]: Return both dataclass and OmegaConf because OmegaConf has export-related utils.
-
-        # `.to_container()` with `SCMode.INSTANTIATE` resolve interpolations and check MISSING.
-        # It is equal to whole validation.
-        return OmegaConf.to_container(conf_structured, structured_config_mode=SCMode.INSTANTIATE)
-
-    return generated_load_conf
-
-load_conf = gen_load_conf()
+# Exported
+load_conf = generate_conf_loader(CONF_DEFAULT_STR, ConfGlobal)
 """Load configuration type-safely.
 """
