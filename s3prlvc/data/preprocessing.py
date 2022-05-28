@@ -4,9 +4,10 @@ from typing import Optional
 from dataclasses import dataclass
 
 import numpy as np
+from numpy.typing import NDArray
 from omegaconf import MISSING
-import librosa
-import librosa.feature
+import librosa # pyright: ignore [reportMissingTypeStubs]; bacause of librosa
+import librosa.feature # pyright: ignore [reportMissingTypeStubs]; bacause of librosa
 
 
 def db_to_linear(decibel: float) -> float:
@@ -37,16 +38,16 @@ class ConfMelspec:
     fmin: int = MISSING
     fmax: Optional[int] = MISSING
 
-def logmelspectrogram(wave: np.ndarray, conf: ConfMelspec) -> np.ndarray:
+def logmelspectrogram(wave: NDArray[np.float32], conf: ConfMelspec) -> NDArray[np.float32]:
     """Convert a waveform to a scaled mel-frequency log-amplitude spectrogram.
 
     Args:
-        wave::ndarray[Time,] - waveform
+        wave::(Time,) - waveform
         conf - Configuration
     Returns::(Time, Mel_freq) - mel-frequency log(Bel)-amplitude spectrogram
     """
     # mel-frequency linear-amplitude spectrogram :: [Freq=n_mels, T_mel]
-    mel_freq_amp_spec = librosa.feature.melspectrogram(
+    mel_freq_amp_spec: NDArray[np.float32] = librosa.feature.melspectrogram( # type: ignore ; caused by librosa
         y=wave,
         sr=conf.sampling_rate,
         n_fft=conf.n_fft,
@@ -62,7 +63,7 @@ def logmelspectrogram(wave: np.ndarray, conf: ConfMelspec) -> np.ndarray:
     min_db = conf.ref_db + conf.min_db_rel
     ref, amin = db_to_linear(conf.ref_db), db_to_linear(min_db)
     # `power_to_db` hack for linear-amplitude spec to log-amplitude spec conversion
-    mel_freq_log_amp_spec = librosa.power_to_db(mel_freq_amp_spec, ref=ref, amin=amin, top_db=None)
+    mel_freq_log_amp_spec: NDArray[np.float32] = librosa.power_to_db(mel_freq_amp_spec, ref=ref, amin=amin, top_db=None) # type: ignore ; top_db is wrongly typed
     mel_freq_log_amp_spec_bel = mel_freq_log_amp_spec/10.
     mel_freq_log_amp_spec_bel = mel_freq_log_amp_spec_bel.T
     return mel_freq_log_amp_spec_bel

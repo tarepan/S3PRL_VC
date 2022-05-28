@@ -4,7 +4,7 @@
 from typing import Optional
 from dataclasses import dataclass
 
-from omegaconf import MISSING
+from omegaconf import MISSING, SI
 # from speechcorpusy.interface import ConfCorpus
 from speechcorpusy import load_preset
 
@@ -22,13 +22,13 @@ class ConfCorpora:
     download: bool = MISSING
     train: ConfCorpus = ConfCorpus(
         root="${..root}",
-        download="${..download}")
+        download=SI("${..download}"))
     val: ConfCorpus = ConfCorpus(
         root="${..root}",
-        download="${..download}")
+        download=SI("${..download}"))
     test: ConfCorpus = ConfCorpus(
         root="${..root}",
-        download="${..download}")
+        download=SI("${..download}"))
 
 def load_corpora(conf: ConfCorpora):
     """Load corpuses."""

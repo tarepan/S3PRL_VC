@@ -2,23 +2,27 @@
 
 
 import random
-from typing import List, Tuple, Optional
+from typing import Any, List, Tuple, Optional
 from dataclasses import dataclass
 from pathlib import Path
 import pickle
 
-import librosa
+import librosa # pyright: ignore [reportMissingTypeStubs]; bacause of librosa
 import numpy as np
-from sklearn.preprocessing import StandardScaler
-from tqdm import tqdm
-from speechdatasety.helper.archive import try_to_acquire_archive_contents, save_archive
-from speechdatasety.helper.adress import dataset_adress, generate_path_getter
-from speechdatasety.interface.speechcorpusy import AbstractCorpus, ItemId
-from omegaconf import MISSING
+from numpy.typing import NDArray
+from sklearn.preprocessing import StandardScaler # pyright: ignore [reportMissingTypeStubs]; bacause of sklearn
+from tqdm import tqdm # pyright: ignore [reportMissingTypeStubs]; bacause of tqdm
+from speechdatasety.helper.archive import try_to_acquire_archive_contents, save_archive # pyright: ignore [reportMissingTypeStubs]; bacause of speechdatasety
+from speechdatasety.helper.adress import dataset_adress, generate_path_getter # pyright: ignore [reportMissingTypeStubs]; bacause of speechdatasety
+from speechdatasety.interface.speechcorpusy import AbstractCorpus, ItemId # pyright: ignore [reportMissingTypeStubs]; bacause of speechdatasety
+from omegaconf import MISSING, SI
 import torch
+from torch import Tensor, device, from_numpy # pyright: ignore [reportUnknownVariableType] ; because of PyTorch; pylint: disable=no-name-in-module
+import torch.cuda
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data.dataset import Dataset
-from resemblyzer import preprocess_wav, VoiceEncoder
+from resemblyzer import preprocess_wav, VoiceEncoder # pyright: ignore [reportMissingTypeStubs, reportUnknownVariableType]; bacause of resemblyzer
+import s3prl.hub as hub # pyright: ignore [reportMissingTypeStubs]
 
 from .preprocessing import logmelspectrogram, ConfMelspec
 
@@ -26,19 +30,19 @@ from .preprocessing import logmelspectrogram, ConfMelspec
 #####################################################
 # Utils
 
-def read_npy(p: Path):
+def read_npy(path: Path) -> Any:
     """Read .npy from path without `.npy`"""
     # Change file name by appending `.npy` at tail.
-    return np.load(p.with_name(f"{p.name}.npy"))
+    return np.load(path.with_name(f"{path.name}.npy")) # type: ignore
 
-def write_npy(p: Path, d):
+def write_npy(path: Path, data: Any) -> None:
     """Write .npy from path"""
-    p.parent.mkdir(exist_ok=True, parents=True)
-    np.save(p, d)
+    path.parent.mkdir(exist_ok=True, parents=True)
+    np.save(path, data) # type: ignore
 #####################################################
 
 
-def speaker_split_jvs(utterances: List[ItemId]) -> (List[ItemId], List[ItemId]):
+def speaker_split_jvs(utterances: List[ItemId]) -> Tuple[List[ItemId], List[ItemId]]:
     """Split JVS corpus items into two groups."""
 
     anothers_spk = ["95", "96", "98", "99"]
@@ -57,30 +61,33 @@ def speaker_split_jvs(utterances: List[ItemId]) -> (List[ItemId], List[ItemId]):
 @dataclass
 class Stat:
     """Spectrogarm statistics container"""
-    mean_: np.ndarray
-    scale_: np.ndarray
+    mean_: NDArray[np.float32]
+    scale_: NDArray[np.float32]
 
 
 def save_vc_tuples(content_path: Path, num_target: int, tuples: List[List[ItemId]]):
-    p = content_path / f"vc_{num_target}_tuples.pkl"
-    p.parent.mkdir(parents=True, exist_ok=True)
-    with open(p, "wb") as f:
-        pickle.dump(tuples, f)
+    """Save VCTuples"""
+    path = content_path / f"vc_{num_target}_tuples.pkl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "wb") as file:
+        pickle.dump(tuples, file)
 
 def load_vc_tuples(content_path: Path, num_target: int) -> List[List[ItemId]]:
-    p = content_path / f"vc_{num_target}_tuples.pkl"
-    if p.exists():
-        with open(p, "rb") as f:
-            return pickle.load(f)
+    """Load VCTuples"""
+    path = content_path / f"vc_{num_target}_tuples.pkl"
+    if path.exists():
+        with open(path, "rb") as file:
+            vc_tuples: List[List[ItemId]] = pickle.load(file)
+            return vc_tuples
     else:
-        Exception(f"{str(p)} does not exist.")
+        raise Exception(f"{str(path)} does not exist.")
 
 
 def generate_vc_tuples(
     sources: List[ItemId],
     targets: List[ItemId],
     num_target: int,
-    ) -> List[ItemId]:
+    ) -> List[List[ItemId]]:
     """Generate utterance tuples for voice convertion.
 
     VC needs a source utterance (content source) and multiple target utterances (style target).
@@ -94,7 +101,7 @@ def generate_vc_tuples(
         (List[ItemId]): #0 is a source, #1~ are targets
     """
     target_speakers = set(map(lambda item_id: item_id.speaker, targets))
-    full_list = []
+    full_list: List[List[ItemId]] = []
     for trgspk in target_speakers:
         # "all_sources to trgspk" vc tuple
         utts_of_trgspk = list(filter(lambda item_id: item_id.speaker == trgspk, targets))
@@ -111,8 +118,23 @@ def random_clip_index(full_length: int, clip_length: int) -> Tuple[int, int]:
     return start, end
 
 
+########################################## Data ##########################################
+# Unit series
+UnitSeries = NDArray[np.float32]
+# Spectrogram
+Spec = NDArray[np.float32]
+# Speaker embedding
+SpkEmb = NDArray[np.float32]
+# VoiceConversion source/target identities
+VcIdentity = Tuple[str, str, str]
+
+# [unit series / mel-spectrogram / speaker embedding / voice conversion identity]
+UnitMelEmbVc = Tuple[UnitSeries, Spec, SpkEmb, VcIdentity]
+##########################################################################################
+
+
 @dataclass
-class ConfWavMelEmbVcDataset:
+class ConfUnitMelEmbVcDataset:
     """
     Args:
         adress_data_root: Root adress of datasets
@@ -132,14 +154,14 @@ class ConfWavMelEmbVcDataset:
     sr_for_unit: int = MISSING
     sr_for_mel: int = MISSING
     mel: ConfMelspec = ConfMelspec(
-        sampling_rate="${..sr_for_mel}",
-        hop_length="${..n_shift}",)
+        sampling_rate=SI("${..sr_for_mel}"),
+        hop_length=SI("${..n_shift}"),)
 
-class WavMelEmbVcDataset(Dataset):
-    """Dataset containing wave/melSpec/Embedding/VcTuple.
+class UnitMelEmbVcDataset(Dataset[UnitMelEmbVc]):
+    """Dataset containing [unit series / mel-spectrogram / speaker embedding / voice conversion identity].
     """
 
-    def __init__(self, split: str, conf: ConfWavMelEmbVcDataset, corpus: AbstractCorpus):
+    def __init__(self, split: str, conf: ConfUnitMelEmbVcDataset, corpus: AbstractCorpus):
         """
         Prepare voice conversion tuples (source-targets tuple), then generate speaker embedding.
 
@@ -166,10 +188,10 @@ class WavMelEmbVcDataset(Dataset):
         adress_archive, self._path_contents = dataset_adress(
             conf.adress_data_root,
             self._corpus.__class__.__name__,
-            "wav_mel_emb_vctuple",
+            "unit_mel_emb_vctuple",
             f"{split}_{conf.num_dev_sample}forDev_{conf.num_target}targets",
         )
-        self._get_path_wav = generate_path_getter("wav", self._path_contents)
+        self._get_path_unit = generate_path_getter("unit", self._path_contents)
         self._get_path_emb = generate_path_getter("emb", self._path_contents)
         self._get_path_mel = generate_path_getter("mel", self._path_contents)
         self._path_stats = self._path_contents / "stats.pkl"
@@ -207,9 +229,9 @@ class WavMelEmbVcDataset(Dataset):
         #   val:
         #     O2O: unseen utterance self-target reconstruction with uttr_2s/spk_1s corpus
         #     A2M: seen-target VC of unseen utterances (uttr_2s/spk_2s => uttr_2s/spk_1s)
-        #     A2A: unseen-target VC of unseen utterances (uttr_2s/spk_2s => other spk of uttr_2s/spk_2s)
+        #     A2A: unseen-target VC of unseen utterances (uttr_2s/spk_2s => other spk of uttr_2s/spk_2s) # pylint: disable=line-too-long
         #   test:
-        #     A2M: seen-target VC of train-val-unseen utterances (uttr_3s/spk_3s => uutr_2s/spk_1s (uttr_2s for only target embedding)
+        #     A2M: seen-target VC of train-val-unseen utterances (uttr_3s/spk_3s => uutr_2s/spk_1s (uttr_2s for only target embedding) # pylint: disable=line-too-long
         #     A2A: unseen-target VC of train-val-unseen utterances (uttr_3s/spk_3s => other spk of uttr_3s/spk_3s)
 
 
@@ -225,7 +247,7 @@ class WavMelEmbVcDataset(Dataset):
         #    val/test A2A: 4spk/4uttr x 4spk = 64 wav
         #
         #    val  -> often, so number should be limited ([3spk]-to-<2spk> A2M (6 uttr), [3spk]-to-[3spk] A2A (9 uttr))
-        #    
+        #
         #    test -> rarely recorded
 
         # Prepare `_sources` and `_targets`
@@ -290,23 +312,36 @@ class WavMelEmbVcDataset(Dataset):
 
         self._corpus.get_contents()
 
-        # Waveform resampling for upstream input
-        # Low sampling rate is enough because waveforms are finally encoded into compressed feature.
-        for item_id in tqdm(self._sources, desc="Preprocess/Resampling", unit="utterance"):
-            wave, _ = librosa.load(self._corpus.get_item_path(item_id), sr=self._sr_for_unit)
-            write_npy(self._get_path_wav(item_id), wave)
+        # Unit
+        _device = device("cuda") if torch.cuda.is_available() else device("cpu")
+        model_unit = getattr(hub, 'vq_wav2vec')().to(_device)
+        for item_id in tqdm(self._sources, desc="Preprocess/Resampling", unit="utterance"): # type: ignore ; because of tqdm
+            item_id: ItemId = item_id # For typing
+            wave: NDArray[np.float32] = librosa.load(self._corpus.get_item_path(item_id), sr=self._sr_for_unit)[0] # type: ignore ; because of librosa
+            ## wav2unit
+            with torch.no_grad():
+                # vq-wav2vec do not pad. Manual padding in both side is needed.
+                # todo: fix hardcoding
+                n_receptive_field, stride_unit = 480, 160
+                pad_oneside = (n_receptive_field//stride_unit -1)//2 * stride_unit
+                wave = np.pad(wave, pad_oneside, mode="reflect") # pyright: ignore [reportUnknownMemberType] ; because of numpy
+                # [(pad+T_wave+pad,)] => (B=1, T_unit=T_wave//stride, vq_dim=512) => (T_unit, vq_dim=512)
+                unit_series = model_unit([from_numpy(wave).to(_device)])["codewords"][0]
+            write_npy(self._get_path_unit(item_id), unit_series.cpu().numpy())
 
         # Embedding
         spk_encoder = VoiceEncoder()
-        for item_id in tqdm(self._targets, desc="Preprocess/Embedding", unit="utterance"):
-            wav = preprocess_wav(self._corpus.get_item_path(item_id))
-            embedding = spk_encoder.embed_utterance(wav)
+        for item_id in tqdm(self._targets, desc="Preprocess/Embedding", unit="utterance"): # type: ignore ; because of tqdm
+            item_id: ItemId = item_id # For typing
+            wav = preprocess_wav(self._corpus.get_item_path(item_id)) # type: ignore ; because of resemblyzer
+            embedding = spk_encoder.embed_utterance(wav) # type: ignore ; because of resemblyzer
             write_npy(self._get_path_emb(item_id), embedding.astype(np.float32))
 
         # Mel-spectrogram
-        for item_id in tqdm(self._sources, desc="Preprocess/Melspectrogram", unit="utterance"):
+        for item_id in tqdm(self._sources, desc="Preprocess/Melspectrogram", unit="utterance"): # type: ignore ; because of tqdm
+            item_id: ItemId = item_id # For typing
             # Resampling for mel-spec generation
-            wave, _ = librosa.load(self._corpus.get_item_path(item_id), sr=self._sr_for_mel)
+            wave = librosa.load(self._corpus.get_item_path(item_id), sr=self._sr_for_mel)[0] # type: ignore ; because of librosa
             # lmspc::(Time, Freq) - Mel-frequency Log(ref=1, Bel)-amplitude spectrogram
             lmspc = logmelspectrogram(wave=wave, conf=self.conf_mel)
             write_npy(self._get_path_mel(item_id), lmspc)
@@ -338,6 +373,9 @@ class WavMelEmbVcDataset(Dataset):
         #   TODO: Fix wrong SD calculation (now: Sum of abs, correct: Root of square sum)
         #   TODO: replace with `StandardScaler().partial_fit` (for bug fix and simplification)
 
+        # For future fix
+        statman = StandardScaler()
+
         # average spectrum over source utterances :: (MelFreq)
         spec_stack = None
         L = 0
@@ -366,38 +404,26 @@ class WavMelEmbVcDataset(Dataset):
         with open(self._path_stats, "wb") as f:
             pickle.dump(scaler, f)
 
-    def __len__(self):
+    def __len__(self) -> int:
         """Number of .wav files (and same number of embeddings)"""
         return len(self._vc_tuples)
 
-    def __getitem__(self, index):
-        """Load waveforms, mel-specs, speaker embeddings and data identities.
+    def __getitem__(self, index: int) -> UnitMelEmbVc:
+        """Load data::UnitMelEmbVc.
 
-        Returns:
-            input_wav_resample (ndarray): Waveform for unit series generation
-            lmspc (ndarray[Time, Freq]): Non-standardized log-mel spectrogram
-            spk_emb: Averaged self|target speaker embeddings
-            vc_identity (str, str, str): (target_speaker, source_speaker, utterance_name)
+        Returns - UnitSeries/MelSpectrogram/speakerEmbedding/VCidentity
         """
 
+        # Data id
         selected = self._vc_tuples[index]
         source_id = selected[0]
-        # Train/Dev: the self utterance (n=1)
-        # Test: another speaker utterances (n=num_target)
         target_ids = selected[1:]
 
-        input_wav_resample = read_npy(self._get_path_wav(source_id))
-        lmspc              = read_npy(self._get_path_mel(source_id))
-
-        # An averaged embedding of the speaker X's utterances (N==`len(target_ids)`)
-        spk_embs = [read_npy(self._get_path_emb(item_id)) for item_id in target_ids]
-        spk_emb = np.mean(np.stack(spk_embs, axis=0), axis=0)
-
-        # VC identity (target_speaker,        source_speaker,    utterance_name)
-        vc_identity = (target_ids[0].speaker, source_id.speaker, source_id.name)
-
-        # Chunked training
-        if (self.split == "train") and (self._len_chunk != None):
+        # Unit series & Mel-spec
+        unit_series: UnitSeries = read_npy(self._get_path_unit(source_id))
+        lmspc: Spec = read_npy(self._get_path_mel(source_id))
+        ## Chunked training
+        if (self.split == "train") and (self._len_chunk is not None):
             # Time-directional random clipping ::(T_mel, freq) -> (clip_mel, freq)
             start_mel, end_mel = random_clip_index(lmspc.shape[-2], self._len_chunk)
             lmspc = lmspc[start_mel : end_mel]
@@ -409,31 +435,47 @@ class WavMelEmbVcDataset(Dataset):
             end_wave = min(wav_length, round(effective_stride * end_mel) + 1)
             input_wav_resample = input_wav_resample[start_wave : end_wave]
 
-        return input_wav_resample, lmspc, spk_emb, vc_identity
-    
-    def collate_fn(self, batch):
+        # Spaeker embedding: averaged embedding of the speaker X's utterances (N==`len(target_ids)`)
+        spk_embs: List[SpkEmb] = [read_npy(self._get_path_emb(item_id)) for item_id in target_ids]
+        spk_emb: SpkEmb = np.mean(np.stack(spk_embs, axis=0), axis=0) # type:ignore
+
+        # VC identity             (target_speaker,        source_speaker,    utterance_name)
+        vc_identity: VcIdentity = (target_ids[0].speaker, source_id.speaker, source_id.name)
+
+        return unit_series, lmspc, spk_emb, vc_identity
+
+    def collate_fn(self, batch: List[UnitMelEmbVc]):
         """collate function used by dataloader.
 
         Sort data with feature time length, then pad features.
         Args:
-            batch: (B, input_wav_resample, lmspc::[Time, Freq], spk_emb, vc_identity)
+            batch: (B, UnitSeries, lmspc::[Time, Freq], spk_emb, vc_identity)
         Returns:
             wavs: List[Tensor(`input_wav_resample`)]
             acoustic_features: List[lmspc::Tensor[Time, Freq]]
             acoustic_features_padded: `acoustic_features` padded by PyTorch function
-            acoustic_feature_lengths: Tensor[Time,]
+            acoustic_feature_lengths: Tensor[Batch,] - signal length of acoustic_features
             spk_embs: Tensor(`spk_emb`)
             vc_ids: List[(target_speaker, source_speaker, utterance_name)]
         """
 
-        # Sort
+        # Sort for RNN packing
         sorted_batch = sorted(batch, key=lambda item: -item[0].shape[0])
 
-        wavs =                  list(map(lambda item: torch.from_numpy(item[0]), sorted_batch))
-        acoustic_features =     list(map(lambda item: torch.from_numpy(item[1]), sorted_batch))
-        acoustic_features_padded = pad_sequence(acoustic_features, batch_first=True)
-        acoustic_feature_lengths = torch.from_numpy(np.array(list(map(lambda feat: feat.size(0), acoustic_features))))
-        spk_embs = torch.from_numpy(np.array(list(map(lambda item: item[2],  sorted_batch))))
-        vc_ids =               list(map(lambda item:                   item[3],  sorted_batch))
+        # # Padding
+        # # input_feature_lengths::(B, T)
+        # input_feature_lengths = torch.IntTensor([feature.shape[0] for feature in unit_series])
+        # # (T, Feat)[] -> (B, Tmax, Feat)
+        # input_features = pad_sequence(input_features, batch_first=True)
 
-        return wavs, acoustic_features, acoustic_features_padded, acoustic_feature_lengths, spk_embs, vc_ids
+        units =                 list(map(lambda item: from_numpy(item[0]), sorted_batch))
+        acoustic_features =     list(map(lambda item: from_numpy(item[1]), sorted_batch))
+
+        unit_series_padded = pad_sequence(units, batch_first=True)
+        unit_lengths = from_numpy(np.array(list(map(lambda series: series.size(0), units)), dtype=np.int64))
+        acoustic_features_padded = pad_sequence(acoustic_features, batch_first=True)
+        acoustic_feature_lengths = from_numpy(np.array(list(map(lambda feat: feat.size(0), acoustic_features))))
+        spk_embs =     from_numpy(np.array(list(map(lambda item: item[2],  sorted_batch))))
+        vc_ids =         list(map(lambda item:                   item[3],  sorted_batch))
+
+        return unit_series_padded, unit_lengths, acoustic_features_padded, acoustic_feature_lengths, spk_embs, vc_ids
