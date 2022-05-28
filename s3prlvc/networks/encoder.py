@@ -2,20 +2,20 @@
 
 
 from dataclasses import dataclass
+from typing import Any, Optional
 
-import torch
-import torch.nn as nn
+from torch import nn, Tensor, tensor # pylint: disable=no-name-in-module
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
-from extorch import Conv1dEx
+from extorch import Conv1dEx # pyright: ignore [reportMissingTypeStubs]; bacause of extorch
 from omegaconf import MISSING
 
 # The follow section is related to Tacotron2
 # Reference: https://github.com/espnet/espnet/blob/master/espnet/nets/pytorch_backend/tacotron2
 
-def encoder_init(m):
+def encoder_init(module: Any):
     """Initialize encoder parameters."""
-    if isinstance(m, nn.Conv1d):
-        nn.init.xavier_uniform_(m.weight, nn.init.calculate_gain("relu"))
+    if isinstance(module, nn.Conv1d):
+        nn.init.xavier_uniform_(module.weight, nn.init.calculate_gain("relu")) # type: ignore ; caused by PyTorch
 
 
 @dataclass
@@ -65,7 +65,7 @@ class Taco2Encoder(nn.Module):
         # convs: [(Conv1d[-BN]-ReLU-DO)xN]
         if conf.num_conv_layers > 0:
             self.convs = nn.ModuleList()
-            for layer in range(conf.num_conv_layers):
+            for _ in range(conf.num_conv_layers):
                 ichans = conf.conv_dim_c
                 # BN on/off, remaining is totally same
                 ## BN (+)
@@ -108,10 +108,9 @@ class Taco2Encoder(nn.Module):
 
         # blstm: [N-LSTM]
         if conf.num_rnn_layers > 0:
-            iunits = conf.conv_dim_c if conf.num_conv_layers != 0 else embed_dim
             dim_lstm = conf.dim_o // 2 if conf.bidirectional else conf.dim_o
             self.blstm = nn.LSTM(
-                iunits, dim_lstm, conf.num_rnn_layers, batch_first=True, bidirectional=conf.bidirectional
+                conf.conv_dim_c, dim_lstm, conf.num_rnn_layers, batch_first=True, bidirectional=conf.bidirectional
             )
             print(f"Encoder LSTM: {'bidi' if conf.bidirectional else 'uni'}")
         else:
@@ -120,31 +119,32 @@ class Taco2Encoder(nn.Module):
         # initialize
         self.apply(encoder_init)
 
-    def forward(self, xs, ilens=None):
+    # Typing of PyTorch forward API is poor.
+    def forward(self, x_series: Tensor, ilens: Optional[Tensor]=None): # pyright: reportIncompatibleMethodOverride=false
         """Calculate forward propagation.
         Args:
-            xs (Batch, T_max, Feature_o): padded acoustic feature sequence
+            x_series (Batch, T_max, Feature_o): padded acoustic feature sequence
         """
 
         # segFC linear
-        xs = self.input_layer(xs).transpose(1, 2)
+        x_series = self.input_layer(x_series).transpose(1, 2)
 
         # Conv
         if self.convs is not None:
             for i in range(len(self.convs)):
                 if self.conv_residual:
-                    xs += self.convs[i](xs)
+                    x_series += self.convs[i](x_series)
                 else:
-                    xs = self.convs[i](xs)
+                    x_series = self.convs[i](x_series)
 
         # LSTM
         if self.blstm is None:
-            return xs.transpose(1, 2)
-        if not isinstance(ilens, torch.Tensor):
-            ilens = torch.tensor(ilens)
-        xs = pack_padded_sequence(xs.transpose(1, 2), ilens.cpu(), batch_first=True)
+            return x_series.transpose(1, 2)
+        if not isinstance(ilens, Tensor):
+            ilens = tensor(ilens)
+        xs_pack_seq = pack_padded_sequence(x_series.transpose(1, 2), ilens.cpu(), batch_first=True)
         self.blstm.flatten_parameters()
-        xs, _ = self.blstm(xs)  # (B, Lmax, C)
+        xs_pack_seq, _ = self.blstm(xs_pack_seq)  # (B, Lmax, C)
         # Pack then Pad
-        xs, hlens = pad_packed_sequence(xs, batch_first=True)
-        return xs, hlens
+        out_seq, hlens = pad_packed_sequence(xs_pack_seq, batch_first=True)
+        return out_seq, hlens

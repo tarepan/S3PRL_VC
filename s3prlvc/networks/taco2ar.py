@@ -1,13 +1,13 @@
 """unit-to-mel Taco2AR network"""
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Optional, Tuple
 
 import numpy as np
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from omegaconf import MISSING
+from numpy.typing import NDArray
+from torch import nn, Tensor, from_numpy, cat # pyright: ignore [reportUnknownVariableType] ; because of PyTorch; pylint: disable=no-name-in-module
+from torch.nn.functional import interpolate # pyright: ignore [reportUnknownVariableType] ; because of PyTorch
+from omegaconf import MISSING, SI
 
 from .encoder import Taco2Encoder, ConfEncoder
 from .conditioning import GlobalCondNet, ConfGlobalCondNet
@@ -52,16 +52,16 @@ class ConfTaco2ARNet:
     dim_processed_ar: int = MISSING
     dim_o: int  = MISSING
     encoder: ConfEncoder = ConfEncoder(
-        dim_o="${..dim_latent}",)
+        dim_o=SI("${..dim_latent}"),)
     global_cond: ConfGlobalCondNet = ConfGlobalCondNet(
-        dim_io="${..dim_latent}",)
+        dim_io=SI("${..dim_latent}"),)
     dec_prenet: ConfDecoderPreNet = ConfDecoderPreNet(
-        dim_i="${..dim_o}",
-        dim_h_o="${..dim_processed_ar}",)
+        dim_i=SI("${..dim_o}"),
+        dim_h_o=SI("${..dim_processed_ar}"),)
     dec_mainnet: ConfDecoderMainNet = ConfDecoderMainNet(
-        dim_i_cond="${..dim_latent}",
-        dim_i_ar="${..dim_processed_ar}",
-        dim_o="${..dim_o}")
+        dim_i_cond=SI("${..dim_latent}"),
+        dim_i_ar=SI("${..dim_processed_ar}"),
+        dim_o=SI("${..dim_o}"))
 
 class Taco2ARNet(nn.Module):
     """
@@ -74,8 +74,8 @@ class Taco2ARNet(nn.Module):
     def __init__(self,
         resample_ratio: float,
         conf: ConfTaco2ARNet,
-        mean: Optional[np.ndarray],
-        scale: Optional[np.ndarray],
+        mean: Optional[NDArray[np.float32]],
+        scale: Optional[NDArray[np.float32]],
     ):
         """
         Args:
@@ -102,27 +102,26 @@ class Taco2ARNet(nn.Module):
             self.register_spec_stat(mean, scale)
         self.prenet = Taco2Prenet(conf.dec_prenet)
         ## MainNet: LSTMP + linear projection
-        conf = conf.dec_mainnet
+        conf_mainnet = conf.dec_mainnet
         ### LSTMP: (1uniLSTM[-LN][-DO][-segFC-Tanh])xN
         self.lstmps = nn.ModuleList()
-        for i_layer in range(conf.num_layers):
+        for i_layer in range(conf_mainnet.num_layers):
             # cat(local_cond, process(ar)) OR lower layer hidden_state/output
-            dim_i_lstm = conf.dim_i_cond + conf.dim_i_ar if i_layer == 0 else conf.dim_h
+            dim_i_lstm = conf_mainnet.dim_i_cond + conf_mainnet.dim_i_ar if i_layer == 0 else conf_mainnet.dim_h
             rnn_layer = ExLSTMCell(
                 dim_i=dim_i_lstm,
-                dim_h_o=conf.dim_h,
-                dropout=conf.dropout_rate,
-                layer_norm=conf.layer_norm,
-                projection=conf.projection,
+                dim_h_o=conf_mainnet.dim_h,
+                dropout=conf_mainnet.dropout_rate,
+                layer_norm=conf_mainnet.layer_norm,
+                projection=conf_mainnet.projection,
             )
             self.lstmps.append(rnn_layer)
         ### Projection: segFC
-        self.proj = nn.Linear(conf.dim_h, conf.dim_o)
-        self.dim_o = conf.dim_o
+        self.proj = nn.Linear(conf_mainnet.dim_h, conf_mainnet.dim_o)
+        self.dim_o = conf_mainnet.dim_o
         ## PostNet: None
-        pass
 
-    def register_spec_stat(self, mean: np.ndarray, scale: np.ndarray) -> None:
+    def register_spec_stat(self, mean: NDArray[np.float32], scale: NDArray[np.float32]) -> None:
         """
         Register spectram statistics as model state.
 
@@ -131,16 +130,21 @@ class Taco2ARNet(nn.Module):
             scale - frequencyBand-wise standard deviation
         """
         # buffer is part of state_dict (saved by PyTorch functions)
-        self.register_buffer("target_mean", torch.from_numpy(mean).float())
-        self.register_buffer("target_scale", torch.from_numpy(scale).float())
-        
+        self.register_buffer("target_mean", from_numpy(mean).float())
+        self.register_buffer("target_scale", from_numpy(scale).float())
 
-    def forward(self, features, lens, spk_emb, targets = None):
+    # Typing of PyTorch forward API is poor.
+    def forward(self, # pyright: reportIncompatibleMethodOverride=false
+        features: Tensor,
+        lens: Tensor,
+        spk_emb: Tensor,
+        targets: Optional[Tensor] = None
+    ) -> Tuple[Tensor, Tensor]:
         """Convert unit sequence into acoustic feature sequence.
 
         Args:
             features (Batch, T_max, Feature_i): input unit sequences
-            lens
+            lens (Batch) - Lengths of unpadded input unit sequence
             spk_emb (Batch, Spk_emb): speaker embedding vectors as global conditioning
             targets (Batch, T_max, Feature_o): padded target acoustic feature sequences
         Returns:
@@ -152,7 +156,7 @@ class Taco2ARNet(nn.Module):
         # (B, T_max, Feat_i) => (B, Feat_i, T_max) => (B, Feat_i, T_max') => (B, T_max', Feat_i)
         features = features.permute(0, 2, 1)
         # Nearest interpolation
-        resampled_features = F.interpolate(features, scale_factor = self.resample_ratio)
+        resampled_features: Tensor = interpolate(features, scale_factor = self.resample_ratio)
         resampled_features = resampled_features.permute(0, 2, 1)
         lens = lens * self.resample_ratio
 
@@ -168,7 +172,7 @@ class Taco2ARNet(nn.Module):
         # Transpose for easy access: (B, T_max, Feat_o) => (T_max, B, Feat_o)
         if targets is not None:
             targets = targets.transpose(0, 1)
-        predicted_list = []
+        predicted_list: List[Tensor] = []
 
         # Initialize LSTM hidden state and cell state of all LSTMP layers, and x_t-1
         _tensor = conditioning_series
@@ -181,11 +185,11 @@ class Taco2ARNet(nn.Module):
 
         # step-by-step loop for autoregressive decoding
         ## local_cond::(B, hidden_dim)
-        for t, local_cond in enumerate(conditioning_series.transpose(0, 1)):
+        for step, local_cond in enumerate(conditioning_series.transpose(0, 1)):
             # Single time step
             ## RNN input (local conditioning and processed AR)
             ar = self.prenet(prev_out)
-            cond_plus_ar = torch.cat([local_cond, ar], dim=1)
+            cond_plus_ar = cat([local_cond, ar], dim=1)
             ## Run single time step of all LSTMP layers
             for i, lstmp in enumerate(self.lstmps):
                 # Run a layer (1uniLSTM[-LN][-DO]-segFC-Tanh), then update states
@@ -195,11 +199,11 @@ class Taco2ARNet(nn.Module):
             # Projection & Stack: Stack output_t `proj(o_lstmps)` in full-time list
             predicted_list += [self.proj(z_list[-1]).view(B, self.dim_o, -1)]
             # teacher-forcing if `target` else pure-autoregressive
-            prev_out = targets[t] if targets is not None else predicted_list[-1].squeeze(-1)
+            prev_out = targets[step] if targets is not None else predicted_list[-1].squeeze(-1)
             # AR spectrum is normalized (todo: could be moved up, but it change t=0 behavior)
             prev_out = (prev_out - self.target_mean) / self.target_scale
             # /Single time step
         # (Batch, Freq, 1?)[] -> (Batch, Freq, Tmax) -> (Batch, Tmax, Freq)
-        predicted = torch.cat(predicted_list, dim=2).transpose(1, 2)
+        predicted = cat(predicted_list, dim=2).transpose(1, 2)
 
         return predicted, lens

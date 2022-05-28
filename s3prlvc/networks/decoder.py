@@ -2,9 +2,9 @@
 
 
 from dataclasses import dataclass
+from typing import Tuple
 
-import torch
-import torch.nn as nn
+from torch import nn, Tensor, tanh # pylint: disable=no-name-in-module
 import torch.nn.functional as F
 from omegaconf import MISSING
 
@@ -17,7 +17,7 @@ class ConfDecoderPreNet:
         dim_i - Dimension size of input
         dim_h_o - Dimension size of hidden and final layers
         n_layers - Number of FC layer
-        dropout_rate: float=0.5    
+        dropout_rate: float=0.5
     """
     dim_i: int = MISSING
     dim_h_o: int = MISSING
@@ -34,7 +34,8 @@ class Taco2Prenet(nn.Module):
 
     Note:
         This module alway applies dropout even in evaluation.
-        See the detail in `Natural TTS Synthesis by Conditioning WaveNet on Mel Spectrogram Predictions`.
+        See the detail in
+        `Natural TTS Synthesis by Conditioning WaveNet on Mel Spectrogram Predictions`.
     """
 
     def __init__(self, conf: ConfDecoderPreNet):
@@ -44,7 +45,7 @@ class Taco2Prenet(nn.Module):
 
         # Dimension size check for DO only prenet (0-layers)
         if conf.n_layers == 0:
-            assert dim_i == dim_h_o
+            assert conf.dim_i == conf.dim_h_o
 
         # WholeNet
         self.prenet = nn.ModuleList()
@@ -55,14 +56,19 @@ class Taco2Prenet(nn.Module):
                 nn.Sequential(nn.Linear(n_inputs, conf.dim_h_o), nn.ReLU())
             ]
 
-    def forward(self, x):
+    # Typing of PyTorch forward API is poor.
+    def forward(self, x_step: Tensor) -> Tensor: # pyright: reportIncompatibleMethodOverride=false
+        """
+        Args:
+            x_step - single step input
+        """
         # Make sure at least one dropout is applied even when there is no FC layer.
         if len(self.prenet) == 0:
-            return F.dropout(x, self.dropout_rate)
+            return F.dropout(x_step, self.dropout_rate)
 
         for i in range(len(self.prenet)):
-            x = F.dropout(self.prenet[i](x), self.dropout_rate)
-        return x
+            x_step = F.dropout(self.prenet[i](x_step), self.dropout_rate)
+        return x_step
 
 
 class ExLSTMCell(nn.Module):
@@ -73,7 +79,13 @@ class ExLSTMCell(nn.Module):
            c_t-1  __|          |__ c_t
     """
 
-    def __init__(self, dim_i: int, dim_h_o: int, dropout: float, layer_norm: bool, projection: bool):
+    def __init__(self,
+        dim_i: int,
+        dim_h_o: int,
+        dropout: float,
+        layer_norm: bool,
+        projection: bool
+    ):
         """
         Args:
             dim_i - Dimension size of input
@@ -83,26 +95,30 @@ class ExLSTMCell(nn.Module):
             projection - Whether to use non-linear projection after hidden state (LSTMP)
         """
         super().__init__()
-        # Mode flags
-        self.dropout = dropout
-        self.layer_norm = layer_norm
-        self.proj = projection
 
+        # Common LSTM cell
         self.cell = nn.LSTMCell(dim_i, dim_h_o)
 
-        # Normalization
-        if self.layer_norm:
-            self.ln = nn.LayerNorm(dim_h_o)
+        # Modes
+        ## Normalization
+        self._use_layer_norm = layer_norm
+        if self._use_layer_norm:
+            self.layer_norm = nn.LayerNorm(dim_h_o)
+        ## Dropout
+        self._use_dropout = dropout > 0
+        if self._use_dropout:
+            self.dropout = nn.Dropout(p=dropout)
+        ## Projection
+        self._use_projection = projection
+        if self._use_projection:
+            self.projection = nn.Linear(dim_h_o, dim_h_o)
 
-        # Dropout
-        if self.dropout > 0:
-            self.dp = nn.Dropout(p=dropout)
-
-        # Projection: FC-Tanh
-        if self.proj:
-            self.pj = nn.Linear(dim_h_o, dim_h_o)
-
-    def forward(self, input_x, z, c):
+    # Typing of PyTorch forward API is poor.
+    def forward(self, # pyright: reportIncompatibleMethodOverride=false
+        input_x: Tensor,
+        hidden_state: Tensor,
+        cell_state: Tensor
+    ) -> Tuple[Tensor, Tensor]:
         """
         Step RNN cell.
 
@@ -115,15 +131,15 @@ class ExLSTMCell(nn.Module):
             new_c - cell state t
         """
 
-        new_z, new_c = self.cell(input_x, (z, c))
+        new_z, new_c = self.cell(input_x, (hidden_state, cell_state))
 
-        if self.layer_norm:
-            new_z = self.ln(new_z)
+        if self._use_layer_norm:
+            new_z = self.layer_norm(new_z)
 
-        if self.dropout > 0:
-            new_z = self.dp(new_z)
+        if self._use_dropout:
+            new_z = self.dropout(new_z)
 
-        if self.proj:
-            new_z = torch.tanh(self.pj(new_z))
+        if self._use_projection:
+            new_z = tanh(self.projection(new_z))
 
         return new_z, new_c

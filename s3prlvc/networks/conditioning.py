@@ -3,8 +3,7 @@
 
 from dataclasses import dataclass
 
-import torch
-import torch.nn as nn
+from torch import nn, Tensor, cat # pylint: disable=no-name-in-module
 import torch.nn.functional as F
 from omegaconf import MISSING
 
@@ -45,7 +44,8 @@ class GlobalCondNet(nn.Module):
 
         self.projection = nn.Linear(dim_integrated, conf.dim_io)
 
-    def forward(self, i_series, global_cond_vec):
+    # Typing of PyTorch forward API is poor.
+    def forward(self, i_series: Tensor, global_cond_vec: Tensor) -> Tensor: # pyright: reportIncompatibleMethodOverride=false, pylint: disable=line-too-long
         """Integrate a global conditioning vector with an input series.
 
         Args:
@@ -61,6 +61,6 @@ class GlobalCondNet(nn.Module):
             return i_series + self.projection(global_cond_normed).unsqueeze(1)
         elif self.integration_type == "concat":
             cond_series = global_cond_normed.unsqueeze(1).expand(-1, i_series.size(1), -1)
-            return self.projection(torch.cat([i_series, cond_series], dim=-1))
+            return self.projection(cat([i_series, cond_series], dim=-1))
         else:
             raise NotImplementedError("support only add or concat.")
