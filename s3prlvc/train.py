@@ -117,7 +117,7 @@ class CheckpointAndLogging:
 
         # PL's Trainer
         self.default_root_dir = dir_root
-        exists = get_filesystem(path_ckpt).exists(path_ckpt)
+        exists = get_filesystem(path_ckpt).exists(path_ckpt) # type: ignore ; because of fsspec
         self.resume_from_checkpoint = path_ckpt if exists else None
 
         # TB's TensorBoardLogger

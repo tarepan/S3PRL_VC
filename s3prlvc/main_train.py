@@ -2,16 +2,16 @@
 
 
 import pytorch_lightning as pl
-import torchaudio
+import torchaudio # pyright: ignore [reportMissingTypeStubs]; bacause of torchaudio
 
 from .model import Taco2ARVC
-from .data.datamodule import generate_datamodule
+from .data.datamodule import WavMelEmbVcData
 from .train import train
 from .config import load_conf
 
 
 def main_train():
-    """Train s3prlvc with cli arguments and the default dataset.
+    """Run s3prlvc Taco2AR training with cli arguments.
     """
 
     # Load default/extend/CLI configs.
@@ -20,8 +20,11 @@ def main_train():
     # Setup
     pl.seed_everything(conf.seed)
     torchaudio.set_audio_backend("sox_io")
-    model = Taco2ARVC(conf.model)
-    datamodule = generate_datamodule(conf.data)
+    datamodule = WavMelEmbVcData(conf.data)
+    ## For stats
+    datamodule.prepare_data()
+    datamodule.setup()
+    model = Taco2ARVC(conf.model, datamodule.dataset_train.acquire_spec_stat())
 
     # Train
     train(model, conf.train, datamodule)

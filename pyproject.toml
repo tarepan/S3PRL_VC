@@ -19,6 +19,7 @@ omegaconf = "^2.1.1"
 speechcorpusy = {git = "https://github.com/tarepan/speechcorpusy.git", rev = "main"}
 speechdatasety = {git = "https://github.com/tarepan/speechdatasety.git", rev = "main"}
 extorch = {git = "https://github.com/tarepan/extorch.git", rev = "main"}
+s3prl = {git = "https://github.com/tarepan/s3prl.git"}
 tqdm = "^4.0.0"
 Resemblyzer = "^0.1.1-alpha.0"
 scikit-learn = "1.0.2"

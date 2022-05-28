@@ -1,19 +1,20 @@
 """Taco2AR model"""
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import numpy as np
-from torch import nn, Tensor, tensor, from_numpy, maximum # pylint: disable=no-name-in-module
+from numpy.typing import NDArray
+from torch import nn, Tensor, tensor, from_numpy, maximum, device as PTdevice # pyright: ignore [reportUnknownVariableType]; pylint: disable=no-name-in-module ; bacause of PyTorch
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
 import pytorch_lightning as pl
-from omegaconf import MISSING
-from resemblyzer import preprocess_wav, VoiceEncoder
+from omegaconf import MISSING, SI
+from resemblyzer import preprocess_wav, VoiceEncoder # pyright: ignore [reportUnknownVariableType, reportMissingTypeStubs]; bacause of resemblyzer; pylint: disable=too-long-line
 
 from .networks.taco2ar import Taco2ARNet, ConfTaco2ARNet
 from .data.dataset import Stat
-from .utils import make_non_pad_mask
+from .utils import make_non_pad_mask # pyright: ignore [reportUnknownVariableType];
 
 
 class Loss(nn.Module):
@@ -37,35 +38,43 @@ class Loss(nn.Module):
 
         Args:
             stats
-                .mean_::np.ndarray -  frequencyBand-wise mean 
-                .scale_::np.ndarray - frequencyBand-wise standard deviation
+                .mean_ -  frequencyBand-wise mean
+                .scale_ - frequencyBand-wise standard deviation
         """
         # buffer is part of state_dict (saved by PyTorch functions)
         self.register_buffer("target_mean", from_numpy(stats.mean_).float())
         self.register_buffer("target_scale", from_numpy(stats.scale_).float())
 
-    def normalize(self, x):
-        return (x - self.target_mean) / self.target_scale
+    def normalize(self, x_series: Tensor) -> Tensor:
+        """Normalize input with pre-registered statistics."""
+        return (x_series - self.target_mean) / self.target_scale
 
-    def forward(self, x, y, x_lens, y_lens, device):
+    # Typing of PyTorch forward API is poor.
+    def forward(self, # pyright: ignore [reportIncompatibleMethodOverride]
+        prediction_padded: Tensor,
+        target_padded: Tensor,
+        x_lens: Tensor,
+        y_lens: Tensor,
+        device: PTdevice,
+    ) -> Tensor:
         """
         Args:
-            x::Tensor[Batch, Tmax, Freq] - predicted_features
-            y - acoustic_features_padded
-            x_lens - predicted_feature_lengths
-            y_lens - acoustic_feature_lengths
+            prediction_padded::(Batch, Tmax, Freq) - predicted mel-spectrogram, padded
+            target_padded::(Batch, Tmax, Freq) - target mel-spectrogram, padded
+            x_lens::(Batch) - Lengthes of non-padded predicted mel-spectrogram
+            y_lens::(Batch) - Lengthes of non-padded target mel-spectrogram
             device
         """
         # match the input feature length to acoustic feature length to calculate the loss
-        if x.shape[1] > y.shape[1]:
-            x = x[:, :y.shape[1]]
+        if prediction_padded.shape[1] > target_padded.shape[1]:
+            prediction_padded = prediction_padded[:, :target_padded.shape[1]]
             masks = make_non_pad_mask(y_lens).unsqueeze(-1).to(device)
-        if x.shape[1] <= y.shape[1]:
-            y = y[:, :x.shape[1]]
-            masks = make_non_pad_mask(x_lens).unsqueeze(-1).to(device)        
+        if prediction_padded.shape[1] <= target_padded.shape[1]:
+            target_padded = target_padded[:, :prediction_padded.shape[1]]
+            masks = make_non_pad_mask(x_lens).unsqueeze(-1).to(device)
 
-        x_normalized = self.normalize(x)
-        y_normalized = self.normalize(y.to(device))
+        x_normalized = self.normalize(prediction_padded)
+        y_normalized = self.normalize(target_padded.to(device))
 
         # slice based on mask by PyTorch function
         x_masked = x_normalized.masked_select(masks)
@@ -99,7 +108,7 @@ class ConfTaco2ARVC:
     mel_hop_length: int = MISSING
     net: ConfTaco2ARNet = ConfTaco2ARNet()
     optim: ConfOptim = ConfOptim(
-        sched_total_step="${..train_steps}",)
+        sched_total_step=SI("${..train_steps}"),)
 
 class Taco2ARVC(pl.LightningModule):
     """Taco2AR unit-to-mel VC model.
@@ -118,7 +127,7 @@ class Taco2ARVC(pl.LightningModule):
         resample_ratio = mel_per_sec / unit_per_sec
 
         # define model and loss
-        self.model = Taco2ARNet(
+        self.network = Taco2ARNet(
             resample_ratio=resample_ratio,
             conf=conf.net,
             mean=stats.mean_ if stats else None,
@@ -129,86 +138,89 @@ class Taco2ARVC(pl.LightningModule):
         # Utterance embedding model for inference
         self.uttr_encoder = None
 
-    def forward(self, # pylint: disable=arguments-differ
-                split,
-                input_features,
-                acoustic_features,
-                acoustic_features_padded,
-                acoustic_feature_lengths,
-                spk_embs,
-                vc_ids,
-                records):
-        """(PL API) Forward a batch.
+    # def forward(self, # pylint: disable=arguments-differ
+    #             split: str,
+    #             input_features,
+    #             acoustic_features,
+    #             acoustic_features_padded: List[Tensor],
+    #             acoustic_feature_lengths: Tensor,
+    #             spk_embs: Tensor,
+    #             vc_ids,
+    #             records):
+    #     """(PL API) Forward a batch.
 
-        Args:
-            split: mode
-            input_features: list of unpadded features generated by the upstream
-            acoustic_features: List[Tensor(`lmspc`)], not used...?
-            acoustic_features_padded: `acoustic_features` padded by PyTorch function
-            acoustic_feature_lengths: Tensor(feature time length)
-            spk_embs: Tensor(`ref_spk_emb`)
-            vc_ids: List[(target_spk, source_spk, uttr_name)]
-        """
-        pass
+    #     Args:
+    #         split: mode
+    #         input_features: list of unpadded features generated by the upstream
+    #         acoustic_features: List[Tensor(`lmspc`)], not used...?
+    #         acoustic_features_padded: `acoustic_features` padded by PyTorch function
+    #         acoustic_feature_lengths: Tensor(feature time length)
+    #         spk_embs: Tensor(`ref_spk_emb`)
+    #         vc_ids: List[(target_spk, source_spk, uttr_name)]
+    #     """
+    #     pass
 
     # Typing of PL step API is poor. It is typed as `(self, *args, **kwargs)`.
-    def training_step(self, batch): # pylint: disable=arguments-differ
+    def training_step(self, batch: Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]): # pyright: ignore [reportIncompatibleMethodOverride] ; pylint: disable=arguments-differ
         """(PL API) Forward a batch.
 
         Args:
             batch
-                input_features
-                input_feature_lengths
-                acoustic_features_padded
-                acoustic_feature_lengths
+                unit_series_padded - Padded input unit series
+                len_unit_series - Length of non-paded unit_series
+                melspec_padded - Padded target melspectrogram
+                len_melspec - Length of non-padded melspectrograms
                 spk_embs - Speaker embeddings
-                device - device
-            batch_idx - Batch index in a training epoch
-        Returns - loss
+                vc_ids - Voice conversion source/target identities
         """
-        input_features, input_feature_lengths, \
-            acoustic_features_padded, acoustic_feature_lengths, \
-            spk_embs, device = batch
+        unit_series_padded, len_unit_series, melspec_padded, len_melspec, spk_embs, _ = batch
 
-        # The forward
-        predicted_features, predicted_feature_lengths = self.model(
-            input_features, input_feature_lengths, \
+        # The forward with AR teacher-forcing
+        predicted_mel, len_predicted_mel = self.network(
+            unit_series_padded,
+            len_unit_series,
             spk_embs,
-            acoustic_features_padded,
+            melspec_padded,
         )
 
         # Masked/normalized L1 loss
-        loss = self.objective(predicted_features,
-                              acoustic_features_padded,
-                              predicted_feature_lengths,
-                              acoustic_feature_lengths,
-                              device)
+        loss = self.objective(predicted_mel,
+                              melspec_padded,
+                              len_predicted_mel,
+                              len_melspec,
+                              self.device)
 
-        self.log("loss", loss)
+        self.log("loss", loss) #type: ignore ; because of PyTorch-Lightning
         return {"loss": loss}
 
-    def validation_step(self, batch): # pylint: disable=arguments-differ
+    def validation_step(self, batch: Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]): # pyright: ignore [reportIncompatibleMethodOverride] ; pylint: disable=arguments-differ
         """(PL API) Validate a batch.
+
+        Args:
+            batch
+                unit_series_padded - Padded input unit series
+                len_unit_series - Length of non-paded unit_series
+                melspec_padded - Padded target melspectrogram
+                len_melspec - Length of non-padded melspectrograms
+                spk_embs - Speaker embeddings
+                vc_ids - Voice conversion source/target identities
         """
 
-        input_features, input_feature_lengths, \
-            acoustic_features_padded, acoustic_feature_lengths, \
-            spk_embs, device = batch
+        unit_series_padded, len_unit_series, melspec_padded, len_melspec, spk_embs, vc_ids = batch
 
-        predicted_features, predicted_feature_lengths = self.model(
-            input_features,
-            input_feature_lengths,
-            spk_embs,
+        predicted_mel, len_predicted_mel = self.network(
+            unit_series_padded, len_unit_series, spk_embs
         )
         # Masked/normalized L1 loss
-        loss = self.objective(predicted_features,
-                            acoustic_features_padded,
-                            predicted_feature_lengths,
-                            acoustic_feature_lengths,
-                            device)
-        self.log("val_loss", loss)
+        loss = self.objective(predicted_mel,
+                            melspec_padded,
+                            len_predicted_mel,
+                            len_melspec,
+                            self.device)
+        self.log("val_loss", loss) #type: ignore ; because of PyTorch-Lightning
 
         # todo: Synthesis
+        # vc_ids
         # [PyTorch](https://pytorch.org/docs/stable/tensorboard.html#torch.
         #     utils.tensorboard.writer.SummaryWriter.add_audio)
         # self.logger.experiment.add_audio(
@@ -220,11 +232,11 @@ class Taco2ARVC(pl.LightningModule):
 
         # return anything_for_`validation_epoch_end`
 
-    # def test_step(self, batch, batch_idx: int):
+    # def test_step(self, batch, batch_idx: int): # pyright: ignore [reportIncompatibleMethodOverride] ; pylint: disable=arguments-differ
     #     """(PL API) Test a batch. If not provided, test_step == validation_step."""
     #     return anything_for_`test_epoch_end`
 
-    def predict_step(self, batch): # pylint: disable=arguments-differ
+    def predict_step(self, batch: Tuple[Tensor, Tensor]) -> Tensor: # pyright: ignore [reportIncompatibleMethodOverride] ; pylint: disable=arguments-differ
         """(PL API) Generate a mel-spectrogram from a unit sequence and speaker embedding.
         Args:
             batch
@@ -234,13 +246,13 @@ class Taco2ARVC(pl.LightningModule):
             Tensor[Batch==1, TimeMel, Freq] - mel-spectrogram
         """
         unit_series, target_emb = batch
-        return self.model(unit_series.to(self.device), target_emb.to(self.device))
+        return self.network(unit_series.to(self.device), target_emb.to(self.device))
 
-    def configure_optimizers(self):
+    def configure_optimizers(self): # type: ignore ; because of PyTorch-Lightning (no return typing, so inferred as Void);  pylint: disable=too-long-line
         """Set up a optimizer
         """
 
-        optim = AdamW(self.model.parameters(), lr=self._conf.optim.learning_rate)
+        optim = AdamW(self.network.parameters(), lr=self._conf.optim.learning_rate)
 
         # Scheduler's multiplicative factor function
         total_steps = self._conf.optim.sched_total_step
@@ -264,7 +276,7 @@ class Taco2ARVC(pl.LightningModule):
 
     def mel_taco_to_rnnms(self, log_amp_bel: Tensor) -> Tensor:
         """
-        Convert TacoVC-compatible mel-spectrogram to RNNMS-compatible one.
+        Convert Taco2AR-compatible mel-spectrogram to RNNMS-compatible one.
 
         Args:
             log_amp_bel::[Batch==1, TimeMel, Freq] - log(ref=0dB, min=-200dB)-amplitude [B]
@@ -279,7 +291,7 @@ class Taco2ARVC(pl.LightningModule):
         log_pow_ref20_minrel80 = maximum(tensor([-80.]), log_pow_ref20)
         return log_pow_ref20_minrel80 / 80.
 
-    def wavs2emb(self, waves: List[np.ndarray]) -> Tensor:
+    def wavs2emb(self, waves: List[NDArray[np.float32]]) -> Tensor:
         """Convert waveforms into an averaged embedding.
 
         Args:
@@ -293,7 +305,7 @@ class Taco2ARVC(pl.LightningModule):
             self.uttr_encoder = VoiceEncoder().to(self.device)
 
         # Calculate an average of utterance embeddings
-        processed_waves = [preprocess_wav(wave) for wave in waves]
-        ave_emb = self.uttr_encoder.embed_speaker(processed_waves)
+        processed_waves = [preprocess_wav(wave) for wave in waves] #type: ignore
+        ave_emb: NDArray[np.float32] = self.uttr_encoder.embed_speaker(processed_waves) #type: ignore
 
         return from_numpy(ave_emb).unsqueeze(dim=0)
