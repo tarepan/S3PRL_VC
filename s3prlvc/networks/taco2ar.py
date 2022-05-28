@@ -126,7 +126,7 @@ class Taco2ARNet(nn.Module):
         Register spectram statistics as model state.
 
         Args:
-            mean -  frequencyBand-wise mean 
+            mean -  frequencyBand-wise mean
             scale - frequencyBand-wise standard deviation
         """
         # buffer is part of state_dict (saved by PyTorch functions)
@@ -150,7 +150,7 @@ class Taco2ARNet(nn.Module):
         Returns:
             ((Batch, Tmax, Freq), lens)
         """
-        B = features.shape[0]
+        batch = features.shape[0]
 
         # Resampling: resample the input features according to resample_ratio
         # (B, T_max, Feat_i) => (B, Feat_i, T_max) => (B, Feat_i, T_max') => (B, T_max', Feat_i)
@@ -176,20 +176,20 @@ class Taco2ARNet(nn.Module):
 
         # Initialize LSTM hidden state and cell state of all LSTMP layers, and x_t-1
         _tensor = conditioning_series
-        c_list = [_tensor.new_zeros(B, self.conf.dec_mainnet.dim_h)]
-        z_list = [_tensor.new_zeros(B, self.conf.dec_mainnet.dim_h)]
+        c_list = [_tensor.new_zeros(batch, self.conf.dec_mainnet.dim_h)]
+        z_list = [_tensor.new_zeros(batch, self.conf.dec_mainnet.dim_h)]
         for _ in range(1, len(self.lstmps)):
-            c_list += [_tensor.new_zeros(B, self.conf.dec_mainnet.dim_h)]
-            z_list += [_tensor.new_zeros(B, self.conf.dec_mainnet.dim_h)]
-        prev_out = _tensor.new_zeros(B, self.conf.dec_mainnet.dim_o)
+            c_list += [_tensor.new_zeros(batch, self.conf.dec_mainnet.dim_h)]
+            z_list += [_tensor.new_zeros(batch, self.conf.dec_mainnet.dim_h)]
+        prev_out = _tensor.new_zeros(batch, self.conf.dec_mainnet.dim_o)
 
         # step-by-step loop for autoregressive decoding
         ## local_cond::(B, hidden_dim)
         for step, local_cond in enumerate(conditioning_series.transpose(0, 1)):
             # Single time step
             ## RNN input (local conditioning and processed AR)
-            ar = self.prenet(prev_out)
-            cond_plus_ar = cat([local_cond, ar], dim=1)
+            i_ar = self.prenet(prev_out)
+            cond_plus_ar = cat([local_cond, i_ar], dim=1)
             ## Run single time step of all LSTMP layers
             for i, lstmp in enumerate(self.lstmps):
                 # Run a layer (1uniLSTM[-LN][-DO]-segFC-Tanh), then update states
@@ -197,7 +197,7 @@ class Taco2ARNet(nn.Module):
                 lstmp_input = cond_plus_ar if i == 0 else z_list[i-1]
                 z_list[i], c_list[i] = lstmp(lstmp_input, z_list[i], c_list[i])
             # Projection & Stack: Stack output_t `proj(o_lstmps)` in full-time list
-            predicted_list += [self.proj(z_list[-1]).view(B, self.dim_o, -1)]
+            predicted_list += [self.proj(z_list[-1]).view(batch, self.dim_o, -1)]
             # teacher-forcing if `target` else pure-autoregressive
             prev_out = targets[step] if targets is not None else predicted_list[-1].squeeze(-1)
             # AR spectrum is normalized (todo: could be moved up, but it change t=0 behavior)

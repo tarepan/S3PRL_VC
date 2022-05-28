@@ -2,11 +2,27 @@
 
 
 from dataclasses import dataclass
-from typing import Tuple
+from typing import List, Tuple
 
 from torch import nn, Tensor, tanh # pylint: disable=no-name-in-module
 import torch.nn.functional as F
+
 from omegaconf import MISSING
+
+
+class AlwaysDropout(nn.Module):
+    """
+    Special Dropout module, which is applied even in evaluation mode.
+
+    PyTorch nn.Dropout: https://pytorch.org/docs/stable/generated/torch.nn.Dropout.html
+    PyTorch  F.dropout: https://pytorch.org/docs/stable/generated/torch.nn.functional.dropout.html
+    """
+    def __init__(self, prob: float):
+        super().__init__()
+        self._prob = prob
+    def forward(self, inputs: Tensor) -> Tensor:
+        """Dropout always."""
+        return F.dropout(inputs, self._prob, training=True)
 
 
 @dataclass
@@ -39,22 +55,25 @@ class Taco2Prenet(nn.Module):
     """
 
     def __init__(self, conf: ConfDecoderPreNet):
-        super(Taco2Prenet, self).__init__()
-        self._conf = conf
-        self.dropout_rate = conf.dropout_rate
+        super().__init__()
 
-        # Dimension size check for DO only prenet (0-layers)
+        layers: List[nn.Module] = []
+        for layer in range(conf.n_layers):
+            # Single layer: SegFC-ReLU-DO
+            dim_i_layer = conf.dim_i if layer == 0 else conf.dim_h_o
+            layers += [
+                nn.Sequential(
+                    nn.Linear(dim_i_layer, conf.dim_h_o),
+                    nn.ReLU(),
+                    AlwaysDropout(conf.dropout_rate),
+                )
+            ]
+        # Make sure at least one dropout is applied even when there is no FC layer.
         if conf.n_layers == 0:
             assert conf.dim_i == conf.dim_h_o
+            layers += [AlwaysDropout(conf.dropout_rate)]
 
-        # WholeNet
-        self.prenet = nn.ModuleList()
-        for layer in range(conf.n_layers):
-            n_inputs = conf.dim_i if layer == 0 else conf.dim_h_o
-            self.prenet += [
-                # FC-ReLU
-                nn.Sequential(nn.Linear(n_inputs, conf.dim_h_o), nn.ReLU())
-            ]
+        self._net = nn.Sequential(*layers)
 
     # Typing of PyTorch forward API is poor.
     def forward(self, x_step: Tensor) -> Tensor: # pyright: reportIncompatibleMethodOverride=false
@@ -62,13 +81,7 @@ class Taco2Prenet(nn.Module):
         Args:
             x_step - single step input
         """
-        # Make sure at least one dropout is applied even when there is no FC layer.
-        if len(self.prenet) == 0:
-            return F.dropout(x_step, self.dropout_rate)
-
-        for i in range(len(self.prenet)):
-            x_step = F.dropout(self.prenet[i](x_step), self.dropout_rate)
-        return x_step
+        return self._net(x_step)
 
 
 class ExLSTMCell(nn.Module):
