@@ -22,82 +22,82 @@ sr_for_mel: 24000
 mel_hop_length: 256
 train_steps: 50000
 model:
-sr_for_unit: "${sr_for_unit}"
-unit_hop_length: "${upstream_rate}"
-sr_for_mel: "${sr_for_mel}"
-mel_hop_length: "${mel_hop_length}"
-net:
-    dim_latent: 1024
-    dim_processed_ar: 256
-    dim_o: "${dim_mel}"
-    encoder:
-    dim_i: "${dim_unit}"
-    causal: False
-    num_conv_layers: 3
-    conv_dim_c: 512
-    conv_size_k: 5
-    conv_batch_norm: True
-    conv_residual: False
-    conv_dropout_rate: 0.5
-    bidirectional: True
-    num_rnn_layers: 1
-    global_cond:
-    integration_type: concat
-    dim_global_cond: 256
-    dec_prenet:
-    n_layers: 2
-    dropout_rate: 0.5
-    dec_mainnet:
-    dim_h: 1024
-    num_layers: 2
-    dropout_rate: 0.2
-    layer_norm: False
-    projection: True
-optim:
-    learning_rate: 1.0e-4
-    sched_warmup_step: 4000
-    sched_total_step: "${train_steps}"
-data:
-adress_data_root: "/content/gdrive/MyDrive/ML_data"
-corpus:
-    download: False
-    train:
-    name: VCTK
-    val:
-    name: VCTK
-    test:
-    name: VCC20
-loader:
-    batch_size_train: 6
-    batch_size_val: 5
-    batch_size_test: 5
-    num_workers: null
-    pin_memory: null
-dataset:
-    num_target: 10
-    num_dev_sample: 5
-    len_chunk: null
-    # clip_length_mel: null # `len_chunk` ######################################
-    n_shift: "${mel_hop_length}"
     sr_for_unit: "${sr_for_unit}"
+    unit_hop_length: "${upstream_rate}"
     sr_for_mel: "${sr_for_mel}"
-    mel:
-    n_fft: 1024
-    ref_db: 0.0
-    min_db_rel: -200.0
-    n_mels: "${dim_mel}"
-    fmin: 80
-    fmax: 7600
+    mel_hop_length: "${mel_hop_length}"
+    net:
+        dim_latent: 1024
+        dim_processed_ar: 256
+        dim_o: "${dim_mel}"
+        encoder:
+            dim_i: "${dim_unit}"
+            causal: False
+            num_conv_layers: 3
+            conv_dim_c: 512
+            conv_size_k: 5
+            conv_batch_norm: True
+            conv_residual: False
+            conv_dropout_rate: 0.5
+            bidirectional: True
+            num_rnn_layers: 1
+        global_cond:
+            integration_type: concat
+            dim_global_cond: 256
+        dec_prenet:
+            n_layers: 2
+            dropout_rate: 0.5
+        dec_mainnet:
+            dim_h: 1024
+            num_layers: 2
+            dropout_rate: 0.2
+            layer_norm: False
+            projection: True
+    optim:
+        learning_rate: 1.0e-4
+        sched_warmup_step: 4000
+        sched_total_step: "${train_steps}"
+data:
+    adress_data_root: "/content/gdrive/MyDrive/ML_data"
+    corpus:
+        download: False
+        train:
+            name: VCTK
+        val:
+            name: VCTK
+        test:
+            name: VCC20
+    loader:
+        batch_size_train: 6
+        batch_size_val: 5
+        batch_size_test: 5
+        num_workers: null
+        pin_memory: null
+    dataset:
+        num_target: 10
+        num_dev_sample: 5
+        len_chunk: null
+        # clip_length_mel: null # `len_chunk` ######################################
+        n_shift: "${mel_hop_length}"
+        sr_for_unit: "${sr_for_unit}"
+        sr_for_mel: "${sr_for_mel}"
+        mel:
+            n_fft: 1024
+            ref_db: 0.0
+            min_db_rel: -200.0
+            n_mels: "${dim_mel}"
+            fmin: 80
+            fmax: 7600
 train:
-max_epochs: 2000
-# max_steps: "${train_steps}"
-val_interval_epoch: 20
-# val_interval_step: 10000
-profiler: null
-ckpt_log:
-    dir_root: S3PRL_VC
-    name_exp: a2a
-    name_version: default
+    max_epochs: 2000
+    # max_steps: "${train_steps}"
+    val_interval_epoch: 20
+    # val_interval_step: 10000
+    profiler: null
+    ckpt_log:
+        dir_root: S3PRL_VC
+        name_exp: a2a
+        name_version: default
 # eval_dataloaders:
 #   - dev
 #   - test
