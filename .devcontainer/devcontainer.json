@@ -9,13 +9,15 @@
       "dockerfile": "Dockerfile",
       "context": ".."
     },
-
     // VS Code specific properties
     "settings": {
       "terminal.integrated.shell.linux": "/bin/bash",
       "terminal.integrated.shellArgs.linux": [
         "-l"
       ],
+      // Interpreter - Python 3.X in devcontainer
+      "defaultInterpreterPath": "/usr/local/bin/python",
+      //
       "python.linting.enabled": true,
       "python.linting.pylintEnabled": true,
       "python.formatting.autopep8Path": "/usr/local/py-utils/bin/autopep8",
@@ -26,7 +28,9 @@
       "python.linting.mypyPath": "/usr/local/py-utils/bin/mypy",
       "python.linting.pycodestylePath": "/usr/local/py-utils/bin/pycodestyle",
       "python.linting.pydocstylePath": "/usr/local/py-utils/bin/pydocstyle",
-      "python.linting.pylintPath": "/usr/local/py-utils/bin/pylint"
+      "python.linting.pylintPath": "/usr/local/py-utils/bin/pylint",
+      // Static type checker - Pyright in Pylance
+      "python.analysis.typeCheckingMode": "strict"
     },
     "extensions": [
       // It install Pylance (`ms-python.vscode-pylance`) automatically
