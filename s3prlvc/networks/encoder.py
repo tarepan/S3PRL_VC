@@ -2,7 +2,7 @@
 
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 from torch import nn, Tensor, tensor # pylint: disable=no-name-in-module
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
@@ -55,56 +55,28 @@ class Taco2Encoder(nn.Module):
 
     def __init__(self, conf: ConfEncoder):
         super().__init__()
-        # store the hyperparameters
-        self._conf = conf
-        self.conv_residual = conf.conv_residual
 
         # segFC linear
-        self.input_layer = nn.Linear(conf.dim_i, conf.conv_dim_c)
+        self._seg_fc = nn.Linear(conf.dim_i, conf.conv_dim_c)
 
         # convs: [(Conv1d[-BN]-ReLU-DO)xN]
-        if conf.num_conv_layers > 0:
-            self.convs = nn.ModuleList()
-            for _ in range(conf.num_conv_layers):
-                ichans = conf.conv_dim_c
-                # BN on/off, remaining is totally same
-                ## BN (+)
-                if conf.conv_batch_norm:
-                    self.convs += [
-                        nn.Sequential(
-                            Conv1dEx(
-                                ichans,
-                                conf.conv_dim_c,
-                                conf.conv_size_k,
-                                stride=1,
-                                padding=(conf.conv_size_k - 1) // 2,
-                                bias=False,
-                                causal=conf.causal,
-                            ),
-                            nn.BatchNorm1d(conf.conv_dim_c),
-                            nn.ReLU(),
-                            nn.Dropout(conf.conv_dropout_rate),
-                        )
-                    ]
-                ## BN (-)
-                else:
-                    self.convs += [
-                        nn.Sequential(
-                            Conv1dEx(
-                                ichans,
-                                conf.conv_dim_c,
-                                conf.conv_size_k,
-                                stride=1,
-                                padding=(conf.conv_size_k - 1) // 2,
-                                bias=False,
-                                causal=conf.causal,
-                            ),
-                            nn.ReLU(),
-                            nn.Dropout(conf.conv_dropout_rate),
-                        )
-                    ]
-        else:
-            self.convs = None
+        self._use_conv_residual = conf.conv_residual
+        self._convs = nn.ModuleList()
+        for _ in range(conf.num_conv_layers):
+            layer: List[nn.Module] = []
+            layer += [Conv1dEx(
+                        conf.conv_dim_c,
+                        conf.conv_dim_c,
+                        conf.conv_size_k,
+                        stride=1,
+                        padding=(conf.conv_size_k - 1) // 2,
+                        bias=False,
+                        causal=conf.causal,
+            )]
+            layer += [nn.BatchNorm1d(conf.conv_dim_c)] if conf.conv_batch_norm else []
+            layer += [nn.ReLU()]
+            layer += [nn.Dropout(conf.conv_dropout_rate)]
+            self._convs += [nn.Sequential(*layer)]
 
         # blstm: [N-LSTM]
         if conf.num_rnn_layers > 0:
@@ -127,15 +99,14 @@ class Taco2Encoder(nn.Module):
         """
 
         # segFC linear
-        x_series = self.input_layer(x_series).transpose(1, 2)
+        x_series = self._seg_fc(x_series).transpose(1, 2)
 
         # Conv
-        if self.convs is not None:
-            for i in range(len(self.convs)):
-                if self.conv_residual:
-                    x_series += self.convs[i](x_series)
-                else:
-                    x_series = self.convs[i](x_series)
+        for conv_layer in self._convs:
+            if self._use_conv_residual:
+                x_series += conv_layer(x_series)
+            else:
+                x_series = conv_layer(x_series)
 
         # LSTM
         if self.blstm is None:
