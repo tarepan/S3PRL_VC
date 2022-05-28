@@ -101,6 +101,8 @@ train:
 # eval_dataloaders:
 #   - dev
 #   - test
+seed: 1111
+path_extend_conf: null
 """
 
 
@@ -126,7 +128,6 @@ class ConfGlobal:
     model: ConfTaco2ARVC = ConfTaco2ARVC()
     data: ConfWavMelEmbVcData = ConfWavMelEmbVcData()
     train: ConfTrain = ConfTrain()
-    expdir: str = MISSING
 
     seed: int = MISSING
     path_extend_conf: Optional[str] = MISSING
