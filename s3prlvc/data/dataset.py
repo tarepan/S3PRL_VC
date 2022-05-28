@@ -315,7 +315,7 @@ class UnitMelEmbVcDataset(Dataset[UnitMelEmbVc]):
         # Unit
         _device = device("cuda") if torch.cuda.is_available() else device("cpu")
         model_unit = getattr(hub, 'vq_wav2vec')().to(_device)
-        for item_id in tqdm(self._sources, desc="Preprocess/Resampling", unit="utterance"): # type: ignore ; because of tqdm
+        for item_id in tqdm(self._sources, desc="Preprocess/unit", unit="utterance"): # type: ignore ; because of tqdm
             item_id: ItemId = item_id # For typing
             wave: NDArray[np.float32] = librosa.load(self._corpus.get_item_path(item_id), sr=self._sr_for_unit)[0] # type: ignore ; because of librosa
             ## wav2unit
