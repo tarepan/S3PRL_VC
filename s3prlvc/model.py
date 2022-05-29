@@ -238,16 +238,16 @@ class Taco2ARVC(pl.LightningModule):
 
         # Vocoding
         ## Current validation is O2O setup
-        for mel in predicted_mel.to("cpu").numpy():
-            wave_o = self._vocoder.decode(mel_spec=mel.to(self.device), exec_spec_norm=True)
-            # [PyTorch](https://pytorch.org/docs/stable/tensorboard.html#torch.
-            #     utils.tensorboard.writer.SummaryWriter.add_audio)
-            self.logger.experiment.add_audio(
-                f"O2O_{vc_ids[0]}_{vc_ids[2]}",
-                tensor(wave_o).unsqueeze(0), # snd_tensor: Tensor(1, L)
-                global_step=self.global_step,
-                sample_rate=self._conf.mel2wav.sr_output,
-            )
+        # for mel in predicted_mel.to("cpu").numpy():
+        #     wave_o = self._vocoder.decode(mel_spec=mel.to(self.device), exec_spec_norm=True)
+        #     # [PyTorch](https://pytorch.org/docs/stable/tensorboard.html#torch.
+        #     #     utils.tensorboard.writer.SummaryWriter.add_audio)
+        #     self.logger.experiment.add_audio(
+        #         f"O2O_{vc_ids[0]}_{vc_ids[2]}",
+        #         tensor(wave_o).unsqueeze(0), # snd_tensor: Tensor(1, L)
+        #         global_step=self.global_step,
+        #         sample_rate=self._conf.mel2wav.sr_output,
+        #     )
 
         # return anything_for_`validation_epoch_end`
 
