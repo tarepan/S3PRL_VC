@@ -11,6 +11,7 @@ from torch.optim.lr_scheduler import LambdaLR
 import pytorch_lightning as pl
 from omegaconf import MISSING, SI
 from resemblyzer import preprocess_wav, VoiceEncoder # pyright: ignore [reportUnknownVariableType, reportMissingTypeStubs]; bacause of resemblyzer; pylint: disable=too-long-line
+from parallel_wavegan.runners import HiFiGAN # pyright: ignore [reportMissingTypeStubs]; bacause of resemblyzeparallel_wavegan
 
 from .networks.taco2ar import Taco2ARNet, ConfTaco2ARNet
 from .data.dataset import Stat
@@ -85,6 +86,15 @@ class Loss(nn.Module):
 
 
 @dataclass
+class ConfMel2Wav:
+    """Configuration of mel2wav (vocoder).
+    Args:
+        sr_output - Sampling rate of output waveform
+    """
+    sr_output: int = MISSING
+    path_state: str = MISSING
+
+@dataclass
 class ConfOptim:
     """Configuration of optimizer.
     Args:
@@ -109,6 +119,7 @@ class ConfTaco2ARVC:
     net: ConfTaco2ARNet = ConfTaco2ARNet()
     optim: ConfOptim = ConfOptim(
         sched_total_step=SI("${..train_steps}"),)
+    mel2wav: ConfMel2Wav = ConfMel2Wav()
 
 class Taco2ARVC(pl.LightningModule):
     """Taco2AR unit-to-mel VC model.
@@ -137,6 +148,11 @@ class Taco2ARVC(pl.LightningModule):
 
         # Utterance embedding model for inference
         self.uttr_encoder = None
+
+        # Vocoder for mel2wav
+        # url_ckpt = "https://drive.google.com/file/d/12w1LpF6HjsJBmOUUkS6LV1d7AX18SA7u"
+        # download_pretrained_model(url_ckpt, download_dir=None)
+        self._vocoder = HiFiGAN(conf.mel2wav.path_state)
 
     # def forward(self, # pylint: disable=arguments-differ
     #             split: str,
@@ -220,16 +236,18 @@ class Taco2ARVC(pl.LightningModule):
                             self.device)
         self.log("val_loss", loss) #type: ignore ; because of PyTorch-Lightning
 
-        # todo: Synthesis
-        # vc_ids
-        # [PyTorch](https://pytorch.org/docs/stable/tensorboard.html#torch.
-        #     utils.tensorboard.writer.SummaryWriter.add_audio)
-        # self.logger.experiment.add_audio(
-        #     f"audio_{batch_idx}",
-        #     wave, # snd_tensor: Tensor(1, L)
-        #     global_step=self.global_step,
-        #     sample_rate=self._conf.sampling_rate,
-        # )
+        # Vocoding
+        ## Current validation is O2O setup
+        for mel in predicted_mel.to("cpu").numpy():
+            wave_o = self._vocoder.decode(mel_spec=mel.to(self.device), exec_spec_norm=True)
+            # [PyTorch](https://pytorch.org/docs/stable/tensorboard.html#torch.
+            #     utils.tensorboard.writer.SummaryWriter.add_audio)
+            self.logger.experiment.add_audio(
+                f"O2O_{vc_ids[0]}_{vc_ids[2]}",
+                tensor(wave_o).unsqueeze(0), # snd_tensor: Tensor(1, L)
+                global_step=self.global_step,
+                sample_rate=self._conf.mel2wav.sr_output,
+            )
 
         # return anything_for_`validation_epoch_end`
 

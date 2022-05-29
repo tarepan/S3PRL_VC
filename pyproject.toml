@@ -22,6 +22,7 @@ extorch = {git = "https://github.com/tarepan/extorch.git", rev = "main"}
 # Need fairseq master (not latest stable version) & Patched Gambel-softmax
 fairseq = {git = "https://github.com/tarepan/fairseq.git", rev = "main"}
 s3prl = {git = "https://github.com/tarepan/s3prl.git"}
+parallel_wavegan = {git = "https://github.com/tarepan/ParallelWaveGAN.git"}
 tqdm = "^4.0.0"
 Resemblyzer = "0.1.1.dev0"
 scikit-learn = "1.0.2"
