@@ -193,7 +193,7 @@ class Taco2ARVC(pl.LightningModule):
         self.log("loss", loss) #type: ignore ; because of PyTorch-Lightning
         return {"loss": loss}
 
-    def validation_step(self, batch: Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]): # pyright: ignore [reportIncompatibleMethodOverride] ; pylint: disable=arguments-differ
+    def validation_step(self, batch: Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor], _: int): # pyright: ignore [reportIncompatibleMethodOverride] ; pylint: disable=arguments-differ
         """(PL API) Validate a batch.
 
         Args:
@@ -204,6 +204,7 @@ class Taco2ARVC(pl.LightningModule):
                 len_melspec - Length of non-padded melspectrograms
                 spk_embs - Speaker embeddings
                 vc_ids - Voice conversion source/target identities
+            _ - `batch_idx`
         """
 
         unit_series_padded, len_unit_series, melspec_padded, len_melspec, spk_embs, vc_ids = batch
