@@ -152,7 +152,7 @@ class Taco2ARVC(pl.LightningModule):
         # Vocoder for mel2wav
         # url_ckpt = "https://drive.google.com/file/d/12w1LpF6HjsJBmOUUkS6LV1d7AX18SA7u"
         # download_pretrained_model(url_ckpt, download_dir=None)
-        self._vocoder = HiFiGAN(conf.mel2wav.path_state)
+        # self._vocoder = HiFiGAN(conf.mel2wav.path_state)
 
     # def forward(self, # pylint: disable=arguments-differ
     #             split: str,
