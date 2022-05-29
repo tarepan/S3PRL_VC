@@ -32,15 +32,18 @@ model:
         dim_o: "${dim_mel}"
         encoder:
             dim_i: "${dim_unit}"
-            causal: False
+            dim_h: 512
             num_conv_layers: 3
-            conv_dim_c: 512
-            conv_size_k: 5
+            conv:
+                kernel_size: 5
+                causal: False
             conv_batch_norm: True
-            conv_residual: False
             conv_dropout_rate: 0.5
-            bidirectional: True
-            num_rnn_layers: 1
+            conv_residual: False
+            rnn:
+                num_layers: 1
+                bidirectional: True
+
         global_cond:
             integration_type: concat
             dim_global_cond: 256
