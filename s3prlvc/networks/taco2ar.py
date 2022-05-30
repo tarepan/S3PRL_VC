@@ -85,8 +85,8 @@ class Taco2ARNet(nn.Module):
             scale - FrequencyBand-wise standard deviation
         """
         super().__init__()
-        self.conf = conf
-        self.resample_ratio = resample_ratio
+        self._conf = conf
+        self._resample_ratio = resample_ratio
 
         # Speaker-independent Encoder: segFC-Conv-LSTM // segFC512-(Conv1d512_k5s1-BN-ReLU-DO_0.5)x3-1LSTM
         self.encoder = Taco2Encoder(conf.encoder)
@@ -118,7 +118,7 @@ class Taco2ARNet(nn.Module):
             self.lstmps.append(rnn_layer)
         ### Projection: segFC
         self.proj = nn.Linear(conf_mainnet.dim_h, conf_mainnet.dim_o)
-        self.dim_o = conf_mainnet.dim_o
+        self._dim_o = conf_mainnet.dim_o
         ## PostNet: None
 
     def register_spec_stat(self, mean: NDArray[np.float32], scale: NDArray[np.float32]) -> None:
@@ -156,9 +156,9 @@ class Taco2ARNet(nn.Module):
         # (B, T_max, Feat_i) => (B, Feat_i, T_max) => (B, Feat_i, T_max') => (B, T_max', Feat_i)
         features = features.permute(0, 2, 1)
         # Nearest interpolation
-        resampled_features: Tensor = interpolate(features, scale_factor = self.resample_ratio)
+        resampled_features: Tensor = interpolate(features, scale_factor = self._resample_ratio)
         resampled_features = resampled_features.permute(0, 2, 1)
-        lens = lens * self.resample_ratio
+        lens = lens * self._resample_ratio
 
         # (resampled_features:(B, T_max', Feat_i)) -> (B, T_max', Feat_h)
         # `lens` is used for RNN padding. `si` stands for speaker-independent
@@ -176,12 +176,12 @@ class Taco2ARNet(nn.Module):
 
         # Initialize LSTM hidden state and cell state of all LSTMP layers, and x_t-1
         _tensor = conditioning_series
-        c_list = [_tensor.new_zeros(batch, self.conf.dec_mainnet.dim_h)]
-        z_list = [_tensor.new_zeros(batch, self.conf.dec_mainnet.dim_h)]
+        c_list = [_tensor.new_zeros(batch, self._conf.dec_mainnet.dim_h)]
+        z_list = [_tensor.new_zeros(batch, self._conf.dec_mainnet.dim_h)]
         for _ in range(1, len(self.lstmps)):
-            c_list += [_tensor.new_zeros(batch, self.conf.dec_mainnet.dim_h)]
-            z_list += [_tensor.new_zeros(batch, self.conf.dec_mainnet.dim_h)]
-        prev_out = _tensor.new_zeros(batch, self.conf.dec_mainnet.dim_o)
+            c_list += [_tensor.new_zeros(batch, self._conf.dec_mainnet.dim_h)]
+            z_list += [_tensor.new_zeros(batch, self._conf.dec_mainnet.dim_h)]
+        prev_out = _tensor.new_zeros(batch, self._conf.dec_mainnet.dim_o)
 
         # step-by-step loop for autoregressive decoding
         ## local_cond::(B, hidden_dim)
@@ -197,7 +197,7 @@ class Taco2ARNet(nn.Module):
                 lstmp_input = cond_plus_ar if i == 0 else z_list[i-1]
                 z_list[i], c_list[i] = lstmp(lstmp_input, z_list[i], c_list[i])
             # Projection & Stack: Stack output_t `proj(o_lstmps)` in full-time list
-            predicted_list += [self.proj(z_list[-1]).view(batch, self.dim_o, -1)]
+            predicted_list += [self.proj(z_list[-1]).view(batch, self._dim_o, -1)]
             # teacher-forcing if `target` else pure-autoregressive
             prev_out = targets[step] if targets is not None else predicted_list[-1].squeeze(-1)
             # AR spectrum is normalized (todo: could be moved up, but it change t=0 behavior)

@@ -29,7 +29,7 @@ class GlobalCondNet(nn.Module):
 
     def __init__(self, conf: ConfGlobalCondNet):
         super().__init__()
-        self.integration_type = conf.integration_type
+        self._integration_type = conf.integration_type
 
         # Determine dimension size of integration product
         if conf.integration_type == "add":
@@ -57,9 +57,9 @@ class GlobalCondNet(nn.Module):
 
         global_cond_normed = F.normalize(global_cond_vec)
 
-        if self.integration_type == "add":
+        if self._integration_type == "add":
             return i_series + self.projection(global_cond_normed).unsqueeze(1)
-        elif self.integration_type == "concat":
+        elif self._integration_type == "concat":
             cond_series = global_cond_normed.unsqueeze(1).expand(-1, i_series.size(1), -1)
             return self.projection(cat([i_series, cond_series], dim=-1))
         else:

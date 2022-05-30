@@ -85,25 +85,25 @@ class Taco2Encoder(nn.Module):
         super().__init__()
 
         # SegFC: Linear
-        self._seg_fc = nn.Linear(conf.dim_i, conf.dim_h)
+        self.seg_fc = nn.Linear(conf.dim_i, conf.dim_h)
 
         # Convs: (Conv1d[-BN]-ReLU-DO)xN
         self._use_conv_residual = conf.conv_residual
-        self._convs = nn.ModuleList()
+        self.convs = nn.ModuleList()
         for _ in range(conf.num_conv_layers):
             layer: List[nn.Module] = []
             layer += [Conv1dEx(padding=(conf.conv.kernel_size - 1) // 2, **asdict(conf.conv))]
             layer += [nn.BatchNorm1d(conf.conv.out_channels)] if conf.conv_batch_norm else []
             layer += [nn.ReLU()]
             layer += [nn.Dropout(conf.conv_dropout_rate)]
-            self._convs += [nn.Sequential(*layer)]
+            self.convs += [nn.Sequential(*layer)]
         self.apply(encoder_init)
 
         # RNN: N-LSTM
         self._use_rnn = conf.rnn.num_layers > 0
         if self._use_rnn:
             dim_lstm_h = conf.dim_o // 2 if conf.rnn.bidirectional else conf.dim_o
-            self._rnn = nn.LSTM(hidden_size=dim_lstm_h, **asdict(conf.rnn))
+            self.rnn = nn.LSTM(hidden_size=dim_lstm_h, **asdict(conf.rnn))
 
     # Typing of PyTorch forward API is poor.
     def forward(self, x_series: Tensor, ilens: Optional[Tensor]=None): # pyright: reportIncompatibleMethodOverride=false
@@ -113,10 +113,10 @@ class Taco2Encoder(nn.Module):
         """
 
         # SegFC
-        x_series = self._seg_fc(x_series).transpose(1, 2)
+        x_series = self.seg_fc(x_series).transpose(1, 2)
 
         # Conv
-        for conv_layer in self._convs:
+        for conv_layer in self.convs:
             if self._use_conv_residual:
                 x_series += conv_layer(x_series)
             else:
@@ -130,8 +130,8 @@ class Taco2Encoder(nn.Module):
         if not isinstance(ilens, Tensor):
             ilens = tensor(ilens)
         xs_pack_seq = pack_padded_sequence(x_series.transpose(1, 2), ilens.cpu(), batch_first=True)
-        self._rnn.flatten_parameters()
-        xs_pack_seq, _ = self._rnn(xs_pack_seq)  # (B, Lmax, C)
+        self.rnn.flatten_parameters()
+        xs_pack_seq, _ = self.rnn(xs_pack_seq)  # (B, Lmax, C)
         # Pack then Pad
         out_seq, hlens = pad_packed_sequence(xs_pack_seq, batch_first=True)
         return out_seq, hlens

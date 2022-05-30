@@ -73,7 +73,7 @@ class Taco2Prenet(nn.Module):
             assert conf.dim_i == conf.dim_h_o
             layers += [AlwaysDropout(conf.dropout_rate)]
 
-        self._net = nn.Sequential(*layers)
+        self.net = nn.Sequential(*layers)
 
     # Typing of PyTorch forward API is poor.
     def forward(self, x_step: Tensor) -> Tensor: # pyright: reportIncompatibleMethodOverride=false
@@ -81,7 +81,7 @@ class Taco2Prenet(nn.Module):
         Args:
             x_step - single step input
         """
-        return self._net(x_step)
+        return self.net(x_step)
 
 
 class ExLSTMCell(nn.Module):
