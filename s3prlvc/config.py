@@ -96,18 +96,13 @@ data:
             fmin: 80
             fmax: 7600
 train:
-    max_epochs: 2000
-    # max_steps: "${train_steps}"
-    val_interval_epoch: 20
-    # val_interval_step: 10000
+    max_epochs: 30
+    val_interval_epoch: 1
     profiler: null
     ckpt_log:
         dir_root: S3PRL_VC
         name_exp: a2a
         name_version: default
-# eval_dataloaders:
-#   - dev
-#   - test
 seed: 1111
 path_extend_conf: null
 """
