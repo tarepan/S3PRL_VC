@@ -132,16 +132,16 @@ class UnitMelEmbVcDataset(Dataset[UnitMelEmbVc]):
             return _corpus.get_item_path(item_id)
         self._get_item_path = _get_item_path
 
-        preprocess_args = f"{conf.n_shift}{conf.sr_for_unit}{conf.sr_for_mel}" \
-            f"{conf.mel.n_fft}{conf.mel}{conf.mel.ref_db}{conf.mel.min_db_rel}{conf.mel.n_mels}{conf.mel.fmin}{conf.mel.fmax}" \
-            f"{split}{hash(tuple(self._uttrs_seen))}{hash(tuple(self._uttrs_unseen))}"
+        preprocessing_setup = f"{conf.n_shift}{conf.sr_for_unit}{conf.sr_for_mel}{conf.mel}"
+        corpus_split_setup = f"{split}{hash(tuple(self._uttrs_seen))}{hash(tuple(self._uttrs_unseen))}"
+        exp_specifier = str(hash(preprocessing_setup+corpus_split_setup))[1:]
 
         # Construct dataset adresses
         adress_archive, self._path_contents = dataset_adress(
             conf.adress_data_root,
             f"{self._corpus_seen.__class__.__name__}_{self._corpus_unseen.__class__.__name__}",
             "unit_mel_emb",
-            preprocess_args,
+            exp_specifier,
         )
         self._get_path_unit = generate_path_getter("unit", self._path_contents)
         self._get_path_emb = generate_path_getter("emb", self._path_contents)
