@@ -40,10 +40,9 @@ class ConfCorpora:
 
 def load_corpora(conf: ConfCorpora):
     """Load corpuses."""
-    # todo: `name` property in `load_preset`
-    corpus_train = load_preset(conf.train.name, conf=conf.train)
-    corpus_val = load_preset(conf.val.name,   conf=conf.val)
-    corpus_test = load_preset(conf.val.name,   conf=conf.test)
+    corpus_train = load_preset(conf=conf.train)
+    corpus_val = load_preset(conf=conf.val)
+    corpus_test = load_preset(conf=conf.test)
 
     # Corpus split for train/val
     assert conf.train.name == conf.val.name, "Currently support only data.train.name==data.val.name"
