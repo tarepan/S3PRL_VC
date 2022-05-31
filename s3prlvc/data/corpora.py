@@ -13,6 +13,7 @@ from .split import split_spk_uttr
 
 @dataclass
 class CorpusData:
+    """Filtered corpus data."""
     corpus: AbstractCorpus
     utterances: List[ItemId]
 
@@ -20,12 +21,14 @@ class CorpusData:
 # Could be pushed to upstream library
 @dataclass
 class ConfCorpus:
+    """Configuration of corpus."""
     name: str = MISSING
     root: Optional[str] = MISSING
     download: bool = MISSING
 
 @dataclass
 class ConfCorpora:
+    """Configuration of multiple corpuses."""
     root: Optional[str] = MISSING
     download: bool = MISSING
     train: ConfCorpus = ConfCorpus(
