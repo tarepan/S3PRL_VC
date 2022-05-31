@@ -6,6 +6,7 @@ from typing import Any, List, Tuple, Optional
 from dataclasses import dataclass
 from pathlib import Path
 import pickle
+from hashlib import md5
 
 import librosa # pyright: ignore [reportMissingTypeStubs]; bacause of librosa
 import numpy as np
@@ -127,8 +128,8 @@ class UnitMelEmbVcDataset(Dataset[UnitMelEmbVc]):
         self._get_item_path = _get_item_path
 
         preprocessing_setup = f"{conf.n_shift}{conf.sr_for_unit}{conf.sr_for_mel}{conf.mel}"
-        corpus_split_setup = f"{split}{hash(tuple(self._uttrs_seen))}{hash(tuple(self._uttrs_unseen))}"
-        exp_specifier = str(hash(preprocessing_setup+corpus_split_setup))[1:]
+        corpus_split_setup = f"{split}{str(self._uttrs_seen)}{str(self._uttrs_unseen)}"
+        exp_specifier = md5((preprocessing_setup+corpus_split_setup).encode()).hexdigest()
 
         # Construct dataset adresses
         adress_archive, self._path_contents = dataset_adress(
