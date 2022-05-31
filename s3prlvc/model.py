@@ -237,14 +237,13 @@ class Taco2ARVC(pl.LightningModule):
         self.log("val_loss", loss) #type: ignore ; because of PyTorch-Lightning
 
         # Vocoding
-        ## Current validation is O2O setup
-        for mel in predicted_mel.to("cpu").numpy():
+        for i, mel in enumerate(predicted_mel.to("cpu").numpy()):
             wave_o = self._vocoder.decode(mel_spec=mel, exec_spec_norm=True)
             # [PyTorch](https://pytorch.org/docs/stable/tensorboard.html#torch.
             #     utils.tensorboard.writer.SummaryWriter.add_audio)
             self.logger.experiment.add_audio(
                 # e.g. `A2M_jvs001_to_jvs099_uttr00123`
-                f"{vc_ids[3]}_{vc_ids[1]}_to_{vc_ids[0]}_{vc_ids[2]}",
+                f"{vc_ids[i][3]}_{vc_ids[i][1]}_to_{vc_ids[i][0]}_{vc_ids[i][2]}",
                 tensor(wave_o).unsqueeze(0), # snd_tensor: Tensor(1, L)
                 global_step=self.global_step,
                 sample_rate=self._conf.mel2wav.sr_output,
