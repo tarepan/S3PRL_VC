@@ -14,17 +14,19 @@ from sklearn.preprocessing import StandardScaler # pyright: ignore [reportMissin
 from tqdm import tqdm # pyright: ignore [reportMissingTypeStubs]; bacause of tqdm
 from speechdatasety.helper.archive import try_to_acquire_archive_contents, save_archive # pyright: ignore [reportMissingTypeStubs]; bacause of speechdatasety
 from speechdatasety.helper.adress import dataset_adress, generate_path_getter # pyright: ignore [reportMissingTypeStubs]; bacause of speechdatasety
-from speechdatasety.interface.speechcorpusy import AbstractCorpus, ItemId # pyright: ignore [reportMissingTypeStubs]; bacause of speechdatasety
+from speechdatasety.interface.speechcorpusy import ItemId # pyright: ignore [reportMissingTypeStubs]; bacause of speechdatasety
 from omegaconf import MISSING, SI
 import torch
-from torch import Tensor, device, from_numpy # pyright: ignore [reportUnknownVariableType] ; because of PyTorch; pylint: disable=no-name-in-module
+from torch import device, from_numpy # pyright: ignore [reportUnknownVariableType] ; because of PyTorch; pylint: disable=no-name-in-module
 import torch.cuda
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data.dataset import Dataset
 from resemblyzer import preprocess_wav, VoiceEncoder # pyright: ignore [reportMissingTypeStubs, reportUnknownVariableType]; bacause of resemblyzer
-import s3prl.hub as hub # pyright: ignore [reportMissingTypeStubs]
+import s3prl.hub as hub
 
 from .preprocessing import logmelspectrogram, ConfMelspec
+from .pairs import source_to_self_target, all_source_no1_to_all_targets # pyright: ignore [reportMissingTypeStubs]
+from .corpora import CorpusData
 
 
 #####################################################
@@ -41,23 +43,6 @@ def write_npy(path: Path, data: Any) -> None:
     np.save(path, data) # type: ignore
 #####################################################
 
-
-def speaker_split_jvs(utterances: List[ItemId]) -> Tuple[List[ItemId], List[ItemId]]:
-    """Split JVS corpus items into two groups."""
-
-    anothers_spk = ["95", "96", "98", "99"]
-    # Filter for train/test split of single corpus
-    ones = list(filter(
-        lambda item_id: item_id.speaker not in anothers_spk,
-        utterances
-    ))
-    anothers = list(filter(
-        lambda item_id: item_id.speaker in anothers_spk,
-        utterances
-    ))
-    return ones, anothers
-
-
 @dataclass
 class Stat:
     """Spectrogarm statistics container"""
@@ -65,58 +50,11 @@ class Stat:
     scale_: NDArray[np.float32]
 
 
-def save_vc_tuples(content_path: Path, num_target: int, tuples: List[List[ItemId]]):
-    """Save VCTuples"""
-    path = content_path / f"vc_{num_target}_tuples.pkl"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "wb") as file:
-        pickle.dump(tuples, file)
-
-def load_vc_tuples(content_path: Path, num_target: int) -> List[List[ItemId]]:
-    """Load VCTuples"""
-    path = content_path / f"vc_{num_target}_tuples.pkl"
-    if path.exists():
-        with open(path, "rb") as file:
-            vc_tuples: List[List[ItemId]] = pickle.load(file)
-            return vc_tuples
-    else:
-        raise Exception(f"{str(path)} does not exist.")
-
-
-def generate_vc_tuples(
-    sources: List[ItemId],
-    targets: List[ItemId],
-    num_target: int,
-    ) -> List[List[ItemId]]:
-    """Generate utterance tuples for voice convertion.
-
-    VC needs a source utterance (content source) and multiple target utterances (style target).
-    This function generate this tuples for all source utterances.
-    Target utterances are randomly sampled from utterances of single target speaker.
-    Args:
-        sources: Source utterances
-        targets: Target utterances
-        num_target: Target utterances (that will be averaged in downstream) per single source
-    Returns:
-        (List[ItemId]): #0 is a source, #1~ are targets
-    """
-    target_speakers = set(map(lambda item_id: item_id.speaker, targets))
-    full_list: List[List[ItemId]] = []
-    for trgspk in target_speakers:
-        # "all_sources to trgspk" vc tuple
-        utts_of_trgspk = list(filter(lambda item_id: item_id.speaker == trgspk, targets))
-        for src in sources:
-            vc_tuple = [src, *random.sample(utts_of_trgspk, num_target)]
-            full_list.append(vc_tuple)
-    return full_list
-
-
 def random_clip_index(full_length: int, clip_length: int) -> Tuple[int, int]:
     """Calculate indexes for array clipping. Tested."""
     start = random.randrange(0, full_length - (clip_length - 1))
     end = start + clip_length
     return start, end
-
 
 ########################################## Data ##########################################
 # Unit series
@@ -132,13 +70,12 @@ VcIdentity = Tuple[str, str, str]
 UnitMelEmbVc = Tuple[UnitSeries, Spec, SpkEmb, VcIdentity]
 ##########################################################################################
 
-
 @dataclass
 class ConfUnitMelEmbVcDataset:
     """
     Args:
         adress_data_root: Root adress of datasets
-        num_target: Number of target utterances per single source utterance
+        num_target: Number of target utterances per single source utterance in A2A test
         num_dev_sample: Number of dev samples per single speaker
         len_chunk: Length of datum chunk, no-chunking when None
         n_shift
@@ -161,11 +98,9 @@ class UnitMelEmbVcDataset(Dataset[UnitMelEmbVc]):
     """Dataset containing [unit series / mel-spectrogram / speaker embedding / voice conversion identity].
     """
 
-    def __init__(self, split: str, conf: ConfUnitMelEmbVcDataset, corpus: AbstractCorpus):
+    def __init__(self, split: str, conf: ConfUnitMelEmbVcDataset, corpuses: Tuple[CorpusData, CorpusData]):
         """
         Prepare voice conversion tuples (source-targets tuple), then generate speaker embedding.
-
-        Data split: [train, dev] = [:-11, -5:, -10:-5] for each speaker
 
         Args:
             split - "train" | "dev" | "test"
@@ -173,6 +108,8 @@ class UnitMelEmbVcDataset(Dataset[UnitMelEmbVc]):
             corpus - Corpus
         """
         super().__init__()
+        # todo: val?
+        assert (split == "train") or (split == "dev") or (split == "test")
         self.split = split
         self._num_target = conf.num_target
         self._len_chunk = conf.len_chunk
@@ -181,114 +118,52 @@ class UnitMelEmbVcDataset(Dataset[UnitMelEmbVc]):
         self._sr_for_mel = conf.sr_for_mel
         self.conf_mel = conf.mel
 
-        self._corpus = corpus
-        corpus_name = self._corpus.__class__.__name__
+        # Corpus & Utterances
+        corpus_data_seen, corpus_data_unseen = corpuses
+        self._corpus_seen = corpus_data_seen.corpus
+        self._uttrs_seen = corpus_data_seen.utterances
+        self._corpus_unseen = corpus_data_unseen.corpus
+        self._uttrs_unseen = corpus_data_unseen.utterances
+
+        # Hack for utterance path access
+        def _get_item_path(item_id: ItemId, flag: str) -> Path:
+            """A: any(unseen), M: many(seen), O: one(seen)"""
+            _corpus = corpus_data_unseen.corpus if (flag is "A") else corpus_data_seen.corpus
+            return _corpus.get_item_path(item_id)
+        self._get_item_path = _get_item_path
+
+        preprocess_args = f"{conf.n_shift}{conf.sr_for_unit}{conf.sr_for_mel}" \
+            f"{conf.mel.n_fft}{conf.mel}{conf.mel.ref_db}{conf.mel.min_db_rel}{conf.mel.n_mels}{conf.mel.fmin}{conf.mel.fmax}" \
+            f"{split}{hash(tuple(self._uttrs_seen))}{hash(tuple(self._uttrs_unseen))}"
 
         # Construct dataset adresses
         adress_archive, self._path_contents = dataset_adress(
             conf.adress_data_root,
-            self._corpus.__class__.__name__,
-            "unit_mel_emb_vctuple",
-            f"{split}_{conf.num_dev_sample}forDev_{conf.num_target}targets",
+            f"{self._corpus_seen.__class__.__name__}_{self._corpus_unseen.__class__.__name__}",
+            "unit_mel_emb",
+            preprocess_args,
         )
         self._get_path_unit = generate_path_getter("unit", self._path_contents)
         self._get_path_emb = generate_path_getter("emb", self._path_contents)
         self._get_path_mel = generate_path_getter("mel", self._path_contents)
         self._path_stats = self._path_contents / "stats.pkl"
 
-        # Select data identities.
-        #   Train: reconstruction (source_uttr + source_emb  -> source_uttr)
-        #   Dev:   unseen-uttr    (source_uttr + source_emb  -> source_uttr)
-        #   Test:  A2A VC         (source_uttr + ave_tgt_emb -> target_uttr)
-
-        all_utterances = self._corpus.get_identities()
-        ## list of [content_source_utt, style_target_utt_1, style_target_utt_2, ...]
-        self._vc_tuples: List[List[ItemId]] = []
-        ## Utterance list of content source, which will be preprocessed as resampled waveform
-        self._sources: List[ItemId] = []
-        ## Utterance list of style target, which will be preprocessed as embedding
-        self._targets: List[ItemId] = []
-
-        # Speaker split (train spk, val spk, test spk) & utterance split (train, val, test)
-        #
-        # [current] Experiment design: train / val O2O / test A2A
-        #          utterance    speaker
-        #   train      -           -
-        #   val     unseen        M2M
-        #   test    unseen        A2A
-        #
-        # [ideal] Experiment design: train / val A2M & A2A / test A2M & A2A
-        #               spk_1s         spk_2s        spk_3s
-        #   uttr_1s     <train>           -             -
-        #   uttr_2s  [val M2 & 2M]  [val A2 & 2A]       -
-        #              (test 2M)
-        #   uttr_3s        -              -       (Test A2 & 2A)
-        #
-        # how to implement
-        #   train: self-target reconstruction with uttr_1s/spk_1s corpus
-        #   val:
-        #     O2O: unseen utterance self-target reconstruction with uttr_2s/spk_1s corpus
-        #     A2M: seen-target VC of unseen utterances (uttr_2s/spk_2s => uttr_2s/spk_1s)
-        #     A2A: unseen-target VC of unseen utterances (uttr_2s/spk_2s => other spk of uttr_2s/spk_2s) # pylint: disable=line-too-long
-        #   test:
-        #     A2M: seen-target VC of train-val-unseen utterances (uttr_3s/spk_3s => uutr_2s/spk_1s (uttr_2s for only target embedding) # pylint: disable=line-too-long
-        #     A2A: unseen-target VC of train-val-unseen utterances (uttr_3s/spk_3s => other spk of uttr_3s/spk_3s)
-
-
-        #                           JVS1-92       JVS93-96      JVS97-100
-        #                           spk_1s         spk_2s        spk_3s
-        #     1-92      uttr_1s      <train>           -             -
-        #    93-96      uttr_2s     [val 2M]    [val A2 & 2A]       -
-        #                          (test 2M)
-        #    97-100     uttr_3s        -              -       (Test A2 & 2A)
-        #
-        #    (max)
-        #    val/test A2M: 4spk/4uttr x 92spk = 1472 wav
-        #    val/test A2A: 4spk/4uttr x 4spk = 64 wav
-        #
-        #    val  -> often, so number should be limited ([3spk]-to-<2spk> A2M (6 uttr), [3spk]-to-[3spk] A2A (9 uttr))
-        #
-        #    test -> rarely recorded
-
-        # Prepare `_sources` and `_targets`
-        if split == 'train' or split == 'dev':
-            # Additionally, prepare self-target `_vc_tuples`
-            if corpus_name == "JVS":
-                # train & val share speakers (seen speaker (O2O | M2M))
-                all_utterances = speaker_split_jvs(all_utterances)[0]
-
-            is_train = split == 'train'
-            idx_dev = -1*conf.num_dev_sample
-            for spk in set(map(lambda item_id: item_id.speaker, all_utterances)):
-                utts_spk = filter(lambda item_id: item_id.speaker == spk, all_utterances)
-                # tuples_spk = [[X#1, X#1], [X#2, X#2], ..., [X#n, X#n]]
-                tuples_spk = list(map(lambda item_id: [item_id, item_id], utts_spk))
-                # Data filtering 3/n
-                ## Data split: [0, -2X] is for train, [-X:] is for dev for each speaker
-                self._vc_tuples.extend(tuples_spk[:2*idx_dev] if is_train else tuples_spk[idx_dev:])
-            # source == target
-            self._sources = list(map(lambda vc_tuple: vc_tuple[0], self._vc_tuples))
-            self._targets = list(map(lambda vc_tuple: vc_tuple[1], self._vc_tuples))
-        elif split == 'test':
-            # `_vc_tuples` is not defined here, but defined in preprocessing
-            if corpus_name == "VCC20":
-                # Missing utterances in original code: E10001-E10050 (c.f. tarepan/s3prl#2)
-                self._sources = list(filter(lambda item_id: item_id.subtype == "eval_source", all_utterances))
-                self._targets = list(filter(lambda i: i.subtype == "train_target_task1", all_utterances))
-            elif corpus_name == "JVS":
-                all_utterances = speaker_split_jvs(all_utterances)[1]
-                # 10 utterances per speaker for test source
-                self._sources = []
-                for spk in set(map(lambda item_id: item_id.speaker, all_utterances)):
-                    utts_spk = list(filter(lambda item_id: item_id.speaker == spk, all_utterances))
-                    self._sources.extend(utts_spk[:10])
-                # All test utterances are target style
-                self._targets = all_utterances
-            elif corpus_name == "AdHoc":
-                self._sources = list(filter(lambda item_id: item_id.subtype == "s", all_utterances))
-                self._targets = list(filter(lambda item_id: item_id.subtype == "t", all_utterances))
-            else:
-                Exception(f"Corpus '{corpus_name}' is not yet supported for test split")
+        # vc_tuples: list of [content_source_utt, style_target_utt_1, style_target_utt_2, ...]
+        if split == "train":
+            o2o_pairs = source_to_self_target(self._uttrs_seen)
+            self._vc_pairs = o2o_pairs
+        else: # val/test
+            a2m_pairs = all_source_no1_to_all_targets(self._uttrs_unseen, self._uttrs_seen,   ("A","M"))
+            a2a_pairs = all_source_no1_to_all_targets(self._uttrs_unseen, self._uttrs_unseen, ("A","A"))
+            self._vc_pairs = a2m_pairs + a2a_pairs
+        # Preprocessing subjects (unique)
+        ## sources: content source, which will be preprocessed as unit series
+        self._sources: List[Tuple[ItemId, str]] = list(set(map(lambda vc_pair: (vc_pair.source, vc_pair.setup[0]), self._vc_pairs)))
+        ## targets: style target, which will be preprocessed as embedding
+        self._targets: List[Tuple[ItemId, str]] = []
+        for pair in self._vc_pairs:
+            self._targets += list(map(lambda target: (target, pair.setup[1]), pair.targets))
+        self._targets = list(set(self._targets))
 
         # Deploy dataset contents.
         contents_acquired = try_to_acquire_archive_contents(adress_archive, self._path_contents)
@@ -299,25 +174,20 @@ class UnitMelEmbVcDataset(Dataset[UnitMelEmbVc]):
             save_archive(self._path_contents, adress_archive)
             print("Dataset contents was generated and archive was saved.")
 
-        # Load vc tuples in the file
-        if split == 'test':
-            self._vc_tuples = load_vc_tuples(self._path_contents, conf.num_target)
-
-        # Report
-        print(f"[Dataset] - number of data for {split}: {len(self._vc_tuples)}")
-
     def _generate_dataset_contents(self) -> None:
         """Generate dataset with corpus auto-download and preprocessing.
         """
 
-        self._corpus.get_contents()
+        self._corpus_seen.get_contents()
+        self._corpus_unseen.get_contents()
 
         # Unit
         _device = device("cuda") if torch.cuda.is_available() else device("cpu")
         model_unit = getattr(hub, 'vq_wav2vec')().to(_device)
-        for item_id in tqdm(self._sources, desc="Preprocess/unit", unit="utterance"): # type: ignore ; because of tqdm
+        for item_id, setup in tqdm(self._sources, desc="Preprocess/unit", unit="utterance"): # type: ignore ; because of tqdm
             item_id: ItemId = item_id # For typing
-            wave: NDArray[np.float32] = librosa.load(self._corpus.get_item_path(item_id), sr=self._sr_for_unit)[0] # type: ignore ; because of librosa
+            setup: str = setup # For typing
+            wave: NDArray[np.float32] = librosa.load(self._get_item_path(item_id, setup), sr=self._sr_for_unit)[0] # type: ignore ; because of librosa
             ## wav2unit
             with torch.no_grad():
                 # vq-wav2vec do not pad. Manual padding in both side is needed.
@@ -331,17 +201,19 @@ class UnitMelEmbVcDataset(Dataset[UnitMelEmbVc]):
 
         # Embedding
         spk_encoder = VoiceEncoder()
-        for item_id in tqdm(self._targets, desc="Preprocess/Embedding", unit="utterance"): # type: ignore ; because of tqdm
+        for item_id, setup in tqdm(self._targets, desc="Preprocess/Embedding", unit="utterance"): # type: ignore ; because of tqdm
             item_id: ItemId = item_id # For typing
-            wav = preprocess_wav(self._corpus.get_item_path(item_id)) # type: ignore ; because of resemblyzer
+            setup: str = setup # For typing
+            wav = preprocess_wav(self._get_item_path(item_id, setup)) # type: ignore ; because of resemblyzer
             embedding = spk_encoder.embed_utterance(wav) # type: ignore ; because of resemblyzer
             write_npy(self._get_path_emb(item_id), embedding.astype(np.float32))
 
         # Mel-spectrogram
-        for item_id in tqdm(self._sources, desc="Preprocess/Melspectrogram", unit="utterance"): # type: ignore ; because of tqdm
+        for item_id, setup in tqdm(self._sources, desc="Preprocess/Melspectrogram", unit="utterance"): # type: ignore ; because of tqdm
             item_id: ItemId = item_id # For typing
+            setup: str = setup # For typing
             # Resampling for mel-spec generation
-            wave = librosa.load(self._corpus.get_item_path(item_id), sr=self._sr_for_mel)[0] # type: ignore ; because of librosa
+            wave = librosa.load(self._get_item_path(item_id, setup), sr=self._sr_for_mel)[0] # type: ignore ; because of librosa
             # lmspc::(Time, Freq) - Mel-frequency Log(ref=1, Bel)-amplitude spectrogram
             lmspc = logmelspectrogram(wave=wave, conf=self.conf_mel)
             write_npy(self._get_path_mel(item_id), lmspc)
@@ -350,13 +222,6 @@ class UnitMelEmbVcDataset(Dataset[UnitMelEmbVc]):
         if self.split == "train":
             self._calculate_spec_stat()
             print("Preprocess/Stats (only in `train`) - done")
-
-        # VC tuples
-        if self.split == "test":
-            # Generate vc tuples randomly (source:target = 1:num_target)
-            vc_tuples = generate_vc_tuples(self._sources, self._targets, self._num_target)
-            save_vc_tuples(self._path_contents, self._num_target, vc_tuples)
-            print("Preprocess/VC_tuple (only in `test`) - done")
 
     def acquire_spec_stat(self):
         """Acquire scaler, the statistics (mean and variance) of mel-spectrograms"""
@@ -374,31 +239,31 @@ class UnitMelEmbVcDataset(Dataset[UnitMelEmbVc]):
         #   TODO: replace with `StandardScaler().partial_fit` (for bug fix and simplification)
 
         # For future fix
-        statman = StandardScaler()
+        statman = StandardScaler() # type: ignore ; temporarily
 
         # average spectrum over source utterances :: (MelFreq)
         spec_stack = None
-        L = 0
-        for item_id in self._sources:
+        total_len = 0
+        for item_id, _ in self._sources:
             # lmspc::(Time, MelFreq)
             lmspc = read_npy(self._get_path_mel(item_id))
-            uttr_sum = np.sum(lmspc, axis=0)
+            uttr_sum = np.sum(lmspc, axis=0) # type: ignore ; temporarily
             spec_stack = np.add(spec_stack, uttr_sum) if spec_stack is not None else uttr_sum
-            L += lmspc.shape[0]
-        ave = spec_stack/L
+            total_len += lmspc.shape[0]
+        ave = spec_stack/total_len # type: ignore ; temporarily
 
         ## sigma in each frequency bin :: (MelFreq)
         sigma_stack = None
-        L = 0
-        for item_id in self._sources:
+        total_len = 0
+        for item_id, _ in self._sources:
             # lmspc::(Time, MelFreq)
             lmspc = read_npy(self._get_path_mel(item_id))
-            uttr_sigma_sum = np.sum(np.abs(lmspc - ave), axis=0)
+            uttr_sigma_sum = np.sum(np.abs(lmspc - ave), axis=0) # type: ignore ; temporarily
             sigma_stack = np.add(sigma_stack, uttr_sigma_sum) if sigma_stack is not None else uttr_sigma_sum
-            L += lmspc.shape[0]
-        sigma = sigma_stack/L
+            total_len += lmspc.shape[0]
+        sigma = sigma_stack / total_len # type: ignore ; temporarily
 
-        scaler = Stat(ave, sigma)
+        scaler = Stat(ave, sigma) # type: ignore ; temporarily
 
         # Save
         with open(self._path_stats, "wb") as f:
@@ -406,7 +271,7 @@ class UnitMelEmbVcDataset(Dataset[UnitMelEmbVc]):
 
     def __len__(self) -> int:
         """Number of .wav files (and same number of embeddings)"""
-        return len(self._vc_tuples)
+        return len(self._vc_pairs)
 
     def __getitem__(self, index: int) -> UnitMelEmbVc:
         """Load data::UnitMelEmbVc.
@@ -415,9 +280,9 @@ class UnitMelEmbVcDataset(Dataset[UnitMelEmbVc]):
         """
 
         # Data id
-        selected = self._vc_tuples[index]
-        source_id = selected[0]
-        target_ids = selected[1:]
+        selected = self._vc_pairs[index]
+        source_id = selected.source
+        target_ids = selected.targets
 
         # Unit series & Mel-spec
         unit_series: UnitSeries = read_npy(self._get_path_unit(source_id))
@@ -439,8 +304,8 @@ class UnitMelEmbVcDataset(Dataset[UnitMelEmbVc]):
         spk_embs: List[SpkEmb] = [read_npy(self._get_path_emb(item_id)) for item_id in target_ids]
         spk_emb: SpkEmb = np.mean(np.stack(spk_embs, axis=0), axis=0) # type:ignore
 
-        # VC identity             (target_speaker,        source_speaker,    utterance_name)
-        vc_identity: VcIdentity = (target_ids[0].speaker, source_id.speaker, source_id.name)
+        # VC identity             (target_speaker,        source_speaker,    utterance_name, setup)
+        vc_identity: VcIdentity = (target_ids[0].speaker, source_id.speaker, source_id.name, )
 
         return unit_series, lmspc, spk_emb, vc_identity
 
