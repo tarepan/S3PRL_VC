@@ -152,7 +152,7 @@ class Taco2ARVC(pl.LightningModule):
         # Vocoder for mel2wav
         # url_ckpt = "https://drive.google.com/file/d/12w1LpF6HjsJBmOUUkS6LV1d7AX18SA7u"
         # download_pretrained_model(url_ckpt, download_dir=None)
-        # self._vocoder = HiFiGAN(conf.mel2wav.path_state)
+        self._vocoder = HiFiGAN(conf.mel2wav.path_state)
 
     # def forward(self, # pylint: disable=arguments-differ
     #             split: str,
@@ -238,16 +238,17 @@ class Taco2ARVC(pl.LightningModule):
 
         # Vocoding
         ## Current validation is O2O setup
-        # for mel in predicted_mel.to("cpu").numpy():
-        #     wave_o = self._vocoder.decode(mel_spec=mel.to(self.device), exec_spec_norm=True)
-        #     # [PyTorch](https://pytorch.org/docs/stable/tensorboard.html#torch.
-        #     #     utils.tensorboard.writer.SummaryWriter.add_audio)
-        #     self.logger.experiment.add_audio(
-        #         f"O2O_{vc_ids[0]}_{vc_ids[2]}",
-        #         tensor(wave_o).unsqueeze(0), # snd_tensor: Tensor(1, L)
-        #         global_step=self.global_step,
-        #         sample_rate=self._conf.mel2wav.sr_output,
-        #     )
+        for mel in predicted_mel.to("cpu").numpy():
+            wave_o = self._vocoder.decode(mel_spec=mel.to(self.device), exec_spec_norm=True)
+            # [PyTorch](https://pytorch.org/docs/stable/tensorboard.html#torch.
+            #     utils.tensorboard.writer.SummaryWriter.add_audio)
+            self.logger.experiment.add_audio(
+                # e.g. `A2M_jvs001_to_jvs099_uttr00123`
+                f"{vc_ids[3]}_{vc_ids[1]}_to_{vc_ids[0]}_{vc_ids[2]}",
+                tensor(wave_o).unsqueeze(0), # snd_tensor: Tensor(1, L)
+                global_step=self.global_step,
+                sample_rate=self._conf.mel2wav.sr_output,
+            )
 
         # return anything_for_`validation_epoch_end`
 
