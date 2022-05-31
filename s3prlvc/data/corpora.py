@@ -52,8 +52,8 @@ def load_corpora(conf: ConfCorpora):
     corpus = corpus_train
     uttrs = corpus.get_identities()
     if conf.train.name == "JVS":
-        spk_unseen = ["jvs_095", "jvs_096", "jvs_098"]
-        spk_seen_val = ["jvs_094", "jvs_099"]
+        spk_unseen = ["jvs095", "jvs096", "jvs098"]
+        spk_seen_val = ["jvs094", "jvs099"]
         num_val_uttr = 10
     # if corpus_name == "VCC20":
     #     # Missing utterances in original code: E10001-E10050 (c.f. tarepan/s3prl#2)
