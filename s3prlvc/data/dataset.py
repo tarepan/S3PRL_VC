@@ -75,8 +75,6 @@ class ConfUnitMelEmbVcDataset:
     """
     Args:
         adress_data_root: Root adress of datasets
-        num_target: Number of target utterances per single source utterance in A2A test
-        num_dev_sample: Number of dev samples per single speaker
         len_chunk: Length of datum chunk, no-chunking when None
         n_shift
         sr_for_unit - sampling rate of waveform for unit
@@ -84,8 +82,6 @@ class ConfUnitMelEmbVcDataset:
         mel - Configuration of mel-spectrogram
     """
     adress_data_root: str = MISSING
-    num_target: int = MISSING
-    num_dev_sample: int = MISSING
     len_chunk: Optional[int] = None
     n_shift: int = MISSING
     sr_for_unit: int = MISSING
@@ -108,10 +104,8 @@ class UnitMelEmbVcDataset(Dataset[UnitMelEmbVc]):
             corpus - Corpus
         """
         super().__init__()
-        # todo: val?
-        assert (split == "train") or (split == "dev") or (split == "test")
+
         self.split = split
-        self._num_target = conf.num_target
         self._len_chunk = conf.len_chunk
         self._n_shift = conf.n_shift
         self._sr_for_unit = conf.sr_for_unit

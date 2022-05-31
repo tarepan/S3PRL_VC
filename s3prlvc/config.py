@@ -81,8 +81,6 @@ data:
         num_workers: null
         pin_memory: null
     dataset:
-        num_target: 10
-        num_dev_sample: 5
         len_chunk: null
         # clip_length_mel: null # `len_chunk` ######################################
         n_shift: "${mel_hop_length}"
