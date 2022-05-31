@@ -64,7 +64,7 @@ Spec = NDArray[np.float32]
 # Speaker embedding
 SpkEmb = NDArray[np.float32]
 # VoiceConversion source/target identities
-VcIdentity = Tuple[str, str, str]
+VcIdentity = Tuple[str, str, str, str]
 
 # [unit series / mel-spectrogram / speaker embedding / voice conversion identity]
 UnitMelEmbVc = Tuple[UnitSeries, Spec, SpkEmb, VcIdentity]
@@ -283,6 +283,7 @@ class UnitMelEmbVcDataset(Dataset[UnitMelEmbVc]):
         selected = self._vc_pairs[index]
         source_id = selected.source
         target_ids = selected.targets
+        setup = selected.setup
 
         # Unit series & Mel-spec
         unit_series: UnitSeries = read_npy(self._get_path_unit(source_id))
@@ -305,7 +306,7 @@ class UnitMelEmbVcDataset(Dataset[UnitMelEmbVc]):
         spk_emb: SpkEmb = np.mean(np.stack(spk_embs, axis=0), axis=0) # type:ignore
 
         # VC identity             (target_speaker,        source_speaker,    utterance_name, setup)
-        vc_identity: VcIdentity = (target_ids[0].speaker, source_id.speaker, source_id.name, )
+        vc_identity: VcIdentity = (target_ids[0].speaker, source_id.speaker, source_id.name, f"{setup[0]}2{setup[1]}")
 
         return unit_series, lmspc, spk_emb, vc_identity
 
