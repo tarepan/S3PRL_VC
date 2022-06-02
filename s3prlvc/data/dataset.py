@@ -18,7 +18,7 @@ from speechdatasety.helper.adress import dataset_adress, generate_path_getter # 
 from speechdatasety.interface.speechcorpusy import ItemId # pyright: ignore [reportMissingTypeStubs]; bacause of speechdatasety
 from omegaconf import MISSING, SI
 import torch
-from torch import device, from_numpy # pyright: ignore [reportUnknownVariableType] ; because of PyTorch; pylint: disable=no-name-in-module
+from torch import device, tensor, from_numpy, stack # pyright: ignore [reportUnknownVariableType] ; because of PyTorch; pylint: disable=no-name-in-module
 import torch.cuda
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data.dataset import Dataset
@@ -312,31 +312,28 @@ class UnitMelEmbVcDataset(Dataset[UnitMelEmbVc]):
         Args:
             batch: (B, UnitSeries, lmspc::[Time, Freq], spk_emb, vc_identity)
         Returns:
-            wavs: List[Tensor(`input_wav_resample`)]
-            acoustic_features: List[lmspc::Tensor[Time, Freq]]
-            acoustic_features_padded: `acoustic_features` padded by PyTorch function
-            acoustic_feature_lengths: Tensor[Batch,] - signal length of acoustic_features
-            spk_embs: Tensor(`spk_emb`)
-            vc_ids: List[(target_speaker, source_speaker, utterance_name)]
+            unit_series_padded :: (Batch, Tmax, Feat) - Padded unit series
+            len_unit_series    :: (Batch,)            - Time lengths of each unit series
+            mspc_series_padded :: (Batch, Tmax, Freq) - Padded mel-spectrograms
+            len_mspc_series    :: (Batch,)            - Time lengths of each mel-spectrogram
+            spk_embs           :: (Batch, Emb)        - Speaker embeddings
+            vc_ids: (target_speaker, source_speaker, utterance_name)[]
         """
 
-        # Sort for RNN packing
+        # Sort for RNN PackedSequence
         sorted_batch = sorted(batch, key=lambda item: -item[0].shape[0])
 
-        # # Padding
-        # # input_feature_lengths::(B, T)
-        # input_feature_lengths = torch.IntTensor([feature.shape[0] for feature in unit_series])
-        # # (T, Feat)[] -> (B, Tmax, Feat)
-        # input_features = pad_sequence(input_features, batch_first=True)
+        # Tensor-nization of each item
+        unit_series =    [from_numpy(unitMelEmbVc[0]) for unitMelEmbVc in sorted_batch]
+        mspc_series =    [from_numpy(unitMelEmbVc[1]) for unitMelEmbVc in sorted_batch]
+        # Padding and batching :: (Ti, Feat)[] -> (Batch, Tmax, Feat)
+        unit_series_padded = pad_sequence(unit_series, batch_first=True)
+        mspc_series_padded = pad_sequence(mspc_series, batch_first=True)
+        # Length of series for RNN PackedSequence
+        len_unit_series = tensor([series.size(0) for series in unit_series])
+        len_mspc_series = tensor([series.size(0) for series in mspc_series])
 
-        units =                 list(map(lambda item: from_numpy(item[0]), sorted_batch))
-        acoustic_features =     list(map(lambda item: from_numpy(item[1]), sorted_batch))
+        spk_embs = stack([from_numpy(unitMelEmbVc[2]) for unitMelEmbVc in sorted_batch])
+        vc_ids =                    [unitMelEmbVc[3]  for unitMelEmbVc in sorted_batch]
 
-        unit_series_padded = pad_sequence(units, batch_first=True)
-        unit_lengths = from_numpy(np.array(list(map(lambda series: series.size(0), units)), dtype=np.int64))
-        acoustic_features_padded = pad_sequence(acoustic_features, batch_first=True)
-        acoustic_feature_lengths = from_numpy(np.array(list(map(lambda feat: feat.size(0), acoustic_features))))
-        spk_embs =     from_numpy(np.array(list(map(lambda item: item[2],  sorted_batch))))
-        vc_ids =         list(map(lambda item:                   item[3],  sorted_batch))
-
-        return unit_series_padded, unit_lengths, acoustic_features_padded, acoustic_feature_lengths, spk_embs, vc_ids
+        return unit_series_padded, len_unit_series, mspc_series_padded, len_mspc_series, spk_embs, vc_ids
