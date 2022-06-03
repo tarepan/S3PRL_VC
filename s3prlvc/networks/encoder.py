@@ -30,8 +30,6 @@ class ConfConv:
     in_channels: int = MISSING
     out_channels: int = MISSING
     kernel_size: int = MISSING
-    stride: int = 1
-    bias: bool = False
     causal: bool = MISSING
 
 @dataclass
@@ -92,7 +90,8 @@ class Taco2Encoder(nn.Module):
         self.convs = nn.ModuleList()
         for _ in range(conf.num_conv_layers):
             layer: List[nn.Module] = []
-            layer += [Conv1dEx(padding=(conf.conv.kernel_size - 1) // 2, **asdict(conf.conv))]
+            # Conv1d: same output length
+            layer += [Conv1dEx(stride=1, padding="same", bias=False, **asdict(conf.conv))]
             layer += [nn.BatchNorm1d(conf.conv.out_channels)] if conf.conv_batch_norm else []
             layer += [nn.ReLU()]
             layer += [nn.Dropout(conf.conv_dropout_rate)]
