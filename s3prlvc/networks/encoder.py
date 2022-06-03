@@ -2,9 +2,9 @@
 
 
 from dataclasses import dataclass, asdict
-from typing import Any, List, Optional
+from typing import Any, List, Tuple
 
-from torch import nn, Tensor, tensor # pylint: disable=no-name-in-module
+from torch import nn, Tensor # pylint: disable=no-name-in-module
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
 from extorch import Conv1dEx # pyright: ignore [reportMissingTypeStubs]; bacause of extorch
 from omegaconf import MISSING, SI
@@ -27,12 +27,12 @@ class ConfConv:
         kernel_size - Size of conv kernel
         causal - Whether Conv1d is causal or not
     """
-    in_channels: int = MISSING # conf.conv_dim_c
-    out_channels: int = MISSING # conf.conv_dim_c
-    kernel_size: int = MISSING # conf.conv_size_k
-    stride=1
-    bias=False
-    causal: bool = MISSING # conf.causal
+    in_channels: int = MISSING
+    out_channels: int = MISSING
+    kernel_size: int = MISSING
+    stride: int = 1
+    bias: bool = False
+    causal: bool = MISSING
 
 @dataclass
 class ConfRNN:
@@ -106,32 +106,40 @@ class Taco2Encoder(nn.Module):
             self.rnn = nn.LSTM(hidden_size=dim_lstm_h, **asdict(conf.rnn))
 
     # Typing of PyTorch forward API is poor.
-    def forward(self, x_series: Tensor, ilens: Optional[Tensor]=None): # pyright: reportIncompatibleMethodOverride=false
-        """Calculate forward propagation.
+    def forward(self, x_series_padded: Tensor, len_x_series: Tensor) -> Tuple[Tensor, Tensor]: # pyright: reportIncompatibleMethodOverride=false
+        """Calculate forward.
+
         Args:
-            x_series (Batch, T_max, Feature_o): padded acoustic feature sequence
+            x_series_padded :: (Batch, T_max, Feat_i) - Padded input series
+            len_x_series    :: (Batch)                - Lengths of each input series
+        Returns:
+            o_series_padded :: (Batch, T_max, Feat_o) - Padded output series
+            len_o_series    :: (Batch)                - Lengths of each output series
         """
 
-        # SegFC
-        x_series = self.seg_fc(x_series).transpose(1, 2)
+        # SegFC :: (B, Tmax, Feat_i) -> (B, Tmax, Feat_h)
+        x_series_padded = self.seg_fc(x_series_padded)
 
-        # Conv
+        # Conv :: (B, Tmax, Feat_h) -> (B, Feat_h, Tmax) -> (B, Feat_h, Tmax)
+        x_series_padded = x_series_padded.transpose(1, 2)
         for conv_layer in self.convs:
             if self._use_conv_residual:
-                x_series += conv_layer(x_series)
+                x_series_padded += conv_layer(x_series_padded)
             else:
-                x_series = conv_layer(x_series)
+                x_series_padded = conv_layer(x_series_padded)
 
-        # Early return w/o LSTM
+        # Early return w/o LSTM :: (B, Feat_h, Tmax) -> (B, Tmax, Feat_h)
         if self._use_rnn is False:
-            return x_series.transpose(1, 2)
+            # Current config use Feat_h == Feat_o, so consistent, but other non-equal configs cause size inconsistency.
+            return x_series_padded.transpose(1, 2), len_x_series
 
         # RNN
-        if not isinstance(ilens, Tensor):
-            ilens = tensor(ilens)
-        xs_pack_seq = pack_padded_sequence(x_series.transpose(1, 2), ilens.cpu(), batch_first=True)
+        ## Packing :: (B, Feat_h, Tmax) -> (B, Tmax, Feat_h) -> PackedSequence(B, Ti, Feat_h)
+        x_series_packed = pack_padded_sequence(x_series_padded.transpose(1, 2), len_x_series.cpu(), batch_first=True)
+        ## RNN :: PackedSequence(B, Ti, Feat_h) -> PackedSequence(B, Ti, Feat_o)
         self.rnn.flatten_parameters()
-        xs_pack_seq, _ = self.rnn(xs_pack_seq)  # (B, Lmax, C)
-        # Pack then Pad
-        out_seq, hlens = pad_packed_sequence(xs_pack_seq, batch_first=True)
-        return out_seq, hlens
+        x_series_packed, _ = self.rnn(x_series_packed)
+        ## UnPacking w/ padding :: PackedSequence(B, Ti, Feat_o) -> (B, Tmax, Feat_o)
+        o_series_padded, len_o_series = pad_packed_sequence(x_series_packed, batch_first=True)
+
+        return o_series_padded, len_o_series
