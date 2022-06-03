@@ -241,14 +241,17 @@ class Taco2ARVC(pl.LightningModule):
         self.log("val_loss", loss) #type: ignore ; because of PyTorch-Lightning
 
         # Vocoding
-        for i, mel in enumerate(mspc_series_padded_predicted.to("cpu").numpy()):
-            wave_o = self._vocoder.decode(mel_spec=mel, exec_spec_norm=True)
+        mel_padded_pred_batch = mspc_series_padded_predicted.to("cpu").numpy()
+        len_mel_pred_batch = len_mspc_series_predicted.to("cpu").tolist()
+        for i, (mel_padded_pred, len_mel_pred) in enumerate(zip(mel_padded_pred_batch, len_mel_pred_batch)):
+            mel_pred = mel_padded_pred[:len_mel_pred]
+            wave_o = self._vocoder.decode(mel_spec=mel_pred, exec_spec_norm=True)
             # [PyTorch](https://pytorch.org/docs/stable/tensorboard.html#torch.
             #     utils.tensorboard.writer.SummaryWriter.add_audio)
-            self.logger.experiment.add_audio(
+            self.logger.experiment.add_audio( # type: ignore ; because of PyTorch Lightning
                 # e.g. `A2M_jvs001_to_jvs099_uttr00123`
                 f"{vc_ids[i][3]}_{vc_ids[i][1]}_to_{vc_ids[i][0]}_{vc_ids[i][2]}",
-                tensor(wave_o).unsqueeze(0), # snd_tensor: Tensor(1, L)
+                from_numpy(wave_o).unsqueeze(0), # snd_tensor: Tensor(1, L)
                 global_step=self.global_step,
                 sample_rate=self._conf.mel2wav.sr_output,
             )
