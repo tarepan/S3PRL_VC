@@ -61,7 +61,6 @@ model:
         sched_warmup_step: 4000
         sched_total_step: "${train_steps}"
     mel2wav:
-        sr_output: 24000
         path_state: /root/.cache/parallel_wavegan/12w1LpF6HjsJBmOUUkS6LV1d7AX18SA7u/checkpoint-2500000steps.pkl
 
 data:
