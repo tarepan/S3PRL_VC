@@ -184,27 +184,29 @@ class Taco2ARVC(pl.LightningModule):
             batch
                 unit_series_padded - Padded input unit series
                 len_unit_series - Length of non-paded unit_series
-                melspec_padded - Padded target melspectrogram
-                len_melspec - Length of non-padded melspectrograms
+                mspc_series_padded - Padded target melspectrogram
+                len_mspc_series - Length of non-padded melspectrograms
                 spk_embs - Speaker embeddings
                 vc_ids - Voice conversion source/target identities
         """
-        unit_series_padded, len_unit_series, melspec_padded, len_melspec, spk_embs, _ = batch
+        unit_series_padded, len_unit_series, mspc_series_padded, len_mspc_series, spk_embs, _ = batch
 
         # The forward with AR teacher-forcing
-        predicted_mel, len_predicted_mel = self.network(
+        mspc_series_padded_predicted, len_mspc_series_predicted = self.network(
             unit_series_padded,
             len_unit_series,
             spk_embs,
-            melspec_padded,
+            mspc_series_padded,
         )
 
         # Masked/normalized L1 loss
-        loss = self.objective(predicted_mel,
-                              melspec_padded,
-                              len_predicted_mel,
-                              len_melspec,
-                              self.device)
+        loss = self.objective(
+            mspc_series_padded_predicted,
+            mspc_series_padded,
+            len_mspc_series_predicted,
+            len_mspc_series,
+            self.device
+        )
 
         self.log("loss", loss) #type: ignore ; because of PyTorch-Lightning
         return {"loss": loss}
@@ -223,21 +225,23 @@ class Taco2ARVC(pl.LightningModule):
             _ - `batch_idx`
         """
 
-        unit_series_padded, len_unit_series, melspec_padded, len_melspec, spk_embs, vc_ids = batch
+        unit_series_padded, len_unit_series, mspc_series_padded, len_mspc_series, spk_embs, vc_ids = batch
 
-        predicted_mel, len_predicted_mel = self.network(
-            unit_series_padded, len_unit_series, spk_embs
-        )
+        # Non teacher-forcing inference
+        mspc_series_padded_predicted, len_mspc_series_predicted = self.network(unit_series_padded, len_unit_series, spk_embs)
+
         # Masked/normalized L1 loss
-        loss = self.objective(predicted_mel,
-                            melspec_padded,
-                            len_predicted_mel,
-                            len_melspec,
-                            self.device)
+        loss = self.objective(
+            mspc_series_padded_predicted,
+            mspc_series_padded,
+            len_mspc_series_predicted,
+            len_mspc_series,
+            self.device
+        )
         self.log("val_loss", loss) #type: ignore ; because of PyTorch-Lightning
 
         # Vocoding
-        for i, mel in enumerate(predicted_mel.to("cpu").numpy()):
+        for i, mel in enumerate(mspc_series_padded_predicted.to("cpu").numpy()):
             wave_o = self._vocoder.decode(mel_spec=mel, exec_spec_norm=True)
             # [PyTorch](https://pytorch.org/docs/stable/tensorboard.html#torch.
             #     utils.tensorboard.writer.SummaryWriter.add_audio)
