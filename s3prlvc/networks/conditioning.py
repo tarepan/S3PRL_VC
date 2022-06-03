@@ -45,7 +45,7 @@ class GlobalCondNet(nn.Module):
         self.projection = nn.Linear(dim_integrated, conf.dim_io)
 
     # Typing of PyTorch forward API is poor.
-    def forward(self, i_series: Tensor, global_cond_vec: Tensor) -> Tensor: # pyright: reportIncompatibleMethodOverride=false, pylint: disable=line-too-long
+    def forward(self, i_series: Tensor, global_cond_vec: Tensor) -> Tensor: # pyright: reportIncompatibleMethodOverride=false
         """Integrate a global conditioning vector with an input series.
 
         Args:

@@ -10,7 +10,7 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
 import pytorch_lightning as pl
 from omegaconf import MISSING, SI
-from resemblyzer import preprocess_wav, VoiceEncoder # pyright: ignore [reportUnknownVariableType, reportMissingTypeStubs]; bacause of resemblyzer; pylint: disable=too-long-line
+from resemblyzer import preprocess_wav, VoiceEncoder # pyright: ignore [reportUnknownVariableType, reportMissingTypeStubs]; bacause of resemblyzer
 from parallel_wavegan.runners import HiFiGAN # pyright: ignore [reportMissingTypeStubs]; bacause of resemblyzeparallel_wavegan
 
 from .networks.taco2ar import Taco2ARNet, ConfTaco2ARNet
@@ -271,7 +271,7 @@ class Taco2ARVC(pl.LightningModule):
         unit_series, target_emb = batch
         return self.network(unit_series.to(self.device), target_emb.to(self.device))
 
-    def configure_optimizers(self): # type: ignore ; because of PyTorch-Lightning (no return typing, so inferred as Void);  pylint: disable=too-long-line
+    def configure_optimizers(self): # type: ignore ; because of PyTorch-Lightning (no return typing, so inferred as Void)
         """Set up a optimizer
         """
 
