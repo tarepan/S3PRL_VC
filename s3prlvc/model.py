@@ -89,9 +89,8 @@ class Loss(nn.Module):
 class ConfMel2Wav:
     """Configuration of mel2wav (vocoder).
     Args:
-        sr_output - Sampling rate of output waveform
+        path_state - Path to the mel2wav vocoder state (checkpoint)
     """
-    sr_output: int = MISSING
     path_state: str = MISSING
 
 @dataclass
@@ -245,7 +244,7 @@ class Taco2ARVC(pl.LightningModule):
         len_mel_pred_batch = len_mspc_series_predicted.to("cpu").tolist()
         for i, (mel_padded_pred, len_mel_pred) in enumerate(zip(mel_padded_pred_batch, len_mel_pred_batch)):
             mel_pred = mel_padded_pred[:len_mel_pred]
-            wave_o = self._vocoder.decode(mel_spec=mel_pred, exec_spec_norm=True)
+            wave_o, sr_o = self._vocoder.decode(mel_spec=mel_pred, exec_spec_norm=True)
             # [PyTorch](https://pytorch.org/docs/stable/tensorboard.html#torch.
             #     utils.tensorboard.writer.SummaryWriter.add_audio)
             self.logger.experiment.add_audio( # type: ignore ; because of PyTorch Lightning
@@ -253,7 +252,7 @@ class Taco2ARVC(pl.LightningModule):
                 f"{vc_ids[i][3]}_{vc_ids[i][1]}_to_{vc_ids[i][0]}_{vc_ids[i][2]}",
                 from_numpy(wave_o).unsqueeze(0), # snd_tensor: Tensor(1, L)
                 global_step=self.global_step,
-                sample_rate=self._conf.mel2wav.sr_output,
+                sample_rate=sr_o,
             )
 
         # return anything_for_`validation_epoch_end`
