@@ -35,6 +35,7 @@ class ConfCkptLog:
 class ConfTrain:
     """Configuration of train.
     Args:
+        gradient_clipping - Maximum gradient L2 norm, clipped when bigger than this (None==∞)
         max_epochs: Number of maximum training epoch
         val_interval_epoch: Interval epoch between validation
         profiler: Profiler setting
