@@ -185,11 +185,12 @@ class UnitMelEmbVcDataset(Dataset[UnitMelEmbVc]):
             wave: NDArray[np.float32] = librosa.load(self._get_item_path(item_id, setup), sr=self._sr_for_unit)[0] # type: ignore ; because of librosa
             ## wav2unit
             with torch.no_grad():
+                ###### No padding for S3PRL consistent
                 # vq-wav2vec do not pad. Manual padding in both side is needed.
                 # todo: fix hardcoding
-                n_receptive_field, stride_unit = 480, 160
-                pad_oneside = (n_receptive_field//stride_unit -1)//2 * stride_unit
-                wave = np.pad(wave, pad_oneside, mode="reflect") # pyright: ignore [reportUnknownMemberType] ; because of numpy
+                # n_receptive_field, stride_unit = 480, 160
+                # pad_oneside = (n_receptive_field//stride_unit -1)//2 * stride_unit
+                # wave = np.pad(wave, pad_oneside, mode="reflect") # pyright: ignore [reportUnknownMemberType] ; because of numpy
                 # [(pad+T_wave+pad,)] => (B=1, T_unit=T_wave//stride, vq_dim=512) => (T_unit, vq_dim=512)
                 unit_series = model_unit([from_numpy(wave).to(_device)])["codewords"][0]
             write_npy(self._get_path_unit(item_id), unit_series.cpu().numpy())
