@@ -112,19 +112,12 @@ class ExLSTMCell(nn.Module):
         # Common LSTM cell
         self.cell = nn.LSTMCell(dim_i, dim_h_o)
 
-        # Modes
-        ## Normalization
-        self._use_layer_norm = layer_norm
-        if self._use_layer_norm:
-            self.layer_norm = nn.LayerNorm(dim_h_o)
-        ## Dropout
-        self._use_dropout = dropout > 0
-        if self._use_dropout:
-            self.dropout = nn.Dropout(p=dropout)
-        ## Projection
-        self._use_projection = projection
-        if self._use_projection:
-            self.projection = nn.Linear(dim_h_o, dim_h_o)
+        # Ex post processings
+        posts: List[nn.Module] = []
+        posts += [nn.LayerNorm(dim_h_o)] if layer_norm else []
+        posts += [nn.Dropout(p=dropout)] if dropout > 0 else []
+        posts += [nn.Linear(dim_h_o, dim_h_o), nn.Tanh()] if projection else []
+        self.posts = nn.Sequential(*posts)
 
     # Typing of PyTorch forward API is poor.
     def forward(self, # pyright: reportIncompatibleMethodOverride=false
@@ -145,14 +138,5 @@ class ExLSTMCell(nn.Module):
         """
 
         new_z, new_c = self.cell(input_x, (hidden_state, cell_state))
-
-        if self._use_layer_norm:
-            new_z = self.layer_norm(new_z)
-
-        if self._use_dropout:
-            new_z = self.dropout(new_z)
-
-        if self._use_projection:
-            new_z = tanh(self.projection(new_z))
-
+        new_z = self.posts(new_z)
         return new_z, new_c
