@@ -39,6 +39,7 @@ class ConfTrain:
         val_interval_epoch: Interval epoch between validation
         profiler: Profiler setting
     """
+    gradient_clipping: Optional[float] = MISSING
     max_epochs: int = MISSING
     val_interval_epoch: int = MISSING
     profiler: Optional[Profiler] = MISSING
@@ -63,6 +64,7 @@ def train(model: Taco2ARVC, conf: ConfTrain, datamodule: LightningDataModule) ->
     )
 
     trainer = pl.Trainer(
+        gradient_clip_val=conf.gradient_clipping,
         accelerator="auto",
         precision=16,
         max_epochs=conf.max_epochs,

@@ -93,6 +93,7 @@ data:
             fmin: 80
             fmax: 7600
 train:
+    gradient_clipping: null
     max_epochs: 30
     val_interval_epoch: 1
     profiler: null
