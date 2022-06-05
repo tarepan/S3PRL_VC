@@ -31,18 +31,16 @@ class GlobalCondNet(nn.Module):
         super().__init__()
         self._integration_type = conf.integration_type
 
-        # Determine dimension size of integration product
         if conf.integration_type == "add":
-            assert conf.dim_global_cond == conf.dim_io
-            # [Batch, T_max, hidden] => [Batch, T_max, hidden==emb] => [Batch, T_max, hidden]
-            dim_integrated = conf.dim_io
+            # Project then Add
+            # Cond[Batch, Emb=emb] -> Cond[Batch, Emb=hidden] for subsequent Input[Batch, T, Feat=hidden] + Cond[Batch, Emb=hidden]
+            self.projection = nn.Linear(conf.dim_global_cond, conf.dim_io)
         elif conf.integration_type == "concat":
-            # [Batch, T_max, hidden] => [Batch, T_max, hidden+emb] => [Batch, T_max, hidden]
-            dim_integrated = conf.dim_io + conf.dim_global_cond
+            # Concat then Project
+            # [Batch, T, Feat=hidden+emb] -> [Batch, T, Feat=hidden] for feature size preservation
+            self.projection = nn.Linear(conf.dim_io + conf.dim_global_cond, conf.dim_io)
         else:
             raise ValueError(f"Integration type '{conf.integration_type}' is not supported.")
-
-        self.projection = nn.Linear(dim_integrated, conf.dim_io)
 
     # Typing of PyTorch forward API is poor.
     def forward(self, i_series: Tensor, global_cond_vec: Tensor) -> Tensor: # pyright: reportIncompatibleMethodOverride=false
