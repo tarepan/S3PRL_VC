@@ -173,12 +173,11 @@ class Taco2ARNet(nn.Module):
         if targets is not None:
             targets = targets.transpose(0, 1)
         predicted_list: List[Tensor] = []
-
         # Initialize LSTM hidden state and cell state of all LSTMP layers, and x_t-1
+        c_list: List[Tensor] = []
+        z_list: List[Tensor] = []
         _tensor = conditioning_series
-        c_list = [_tensor.new_zeros(batch, self._conf.dec_mainnet.dim_h)]
-        z_list = [_tensor.new_zeros(batch, self._conf.dec_mainnet.dim_h)]
-        for _ in range(1, len(self.lstmps)):
+        for _ in range(0, len(self.lstmps)):
             c_list += [_tensor.new_zeros(batch, self._conf.dec_mainnet.dim_h)]
             z_list += [_tensor.new_zeros(batch, self._conf.dec_mainnet.dim_h)]
         prev_out = _tensor.new_zeros(batch, self._conf.dec_mainnet.dim_o)
