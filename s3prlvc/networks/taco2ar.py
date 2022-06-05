@@ -160,18 +160,20 @@ class Taco2ARNet(nn.Module):
         resampled_features = resampled_features.permute(0, 2, 1)
         lens = lens * self._resample_ratio
 
-        # (resampled_features:(B, T_max', Feat_i)) -> (B, T_max', Feat_h)
+        # Encoder :: (B, T_max', Feat_i) -> (B, T_max', Feat_h)
         # `lens` is used for RNN padding. `si` stands for speaker-independent
         si_latent_series, lens = self.encoder(resampled_features, lens)
 
-        # (B, T_max', Feat_h) -> (B, T_max', Feat_h)
+        # GlobalCond :: ((B, T_max', Feat_h), (B, Emb)) -> (B, T_max', Feat_h)
         conditioning_series = self.global_cond(si_latent_series, spk_emb)
 
-        # Decoder: spec_t' = f(spec_t, cond_t), cond_t == f(unit_t, spk_g)
+        # Decoder :: (B, T_max', Feat_h) -> (B, T_max', Freq)
+
         # AR decofing w/ or w/o teacher-forcing
-        # Transpose for easy access: (B, T_max, Feat_o) => (T_max, B, Feat_o)
         if targets is not None:
+            # Transpose for easy access: (B, T_max, Feat_o) => (T_max, B, Feat_o)
             targets = targets.transpose(0, 1)
+
         predicted_list: List[Tensor] = []
         # Initialize LSTM hidden state and cell state of all LSTMP layers, and x_t-1
         c_list: List[Tensor] = []
@@ -191,7 +193,7 @@ class Taco2ARNet(nn.Module):
             cond_plus_ar = cat([local_cond, i_ar], dim=1)
             ## Run single time step of all LSTMP layers
             for i, lstmp in enumerate(self.lstmps):
-                # Run a layer (1uniLSTM[-LN][-DO]-segFC-Tanh), then update states
+                # Run a CellLayer, then update states
                 # Input: RNN input OR lower layer's output
                 lstmp_input = cond_plus_ar if i == 0 else z_list[i-1]
                 z_list[i], c_list[i] = lstmp(lstmp_input, z_list[i], c_list[i])
