@@ -4,10 +4,10 @@
 import pytorch_lightning as pl
 import torchaudio # pyright: ignore [reportMissingTypeStubs]; bacause of torchaudio
 
+from .config import load_conf
 from .model import Taco2ARVC
 from .data.datamodule import WavMelEmbVcData
-from .train import train
-from .config import load_conf
+from .trainer import train
 
 
 def main_train():

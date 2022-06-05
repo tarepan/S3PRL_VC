@@ -6,11 +6,10 @@ from dataclasses import dataclass
 
 from omegaconf import MISSING
 
-from .config_gen import generate_conf_loader
-
-from .train import ConfTrain
+from .lightlightning.config_gen import generate_conf_loader
 from .model import ConfTaco2ARVC
 from .data.datamodule import ConfWavMelEmbVcData
+from .trainer import ConfTrain
 
 
 CONF_DEFAULT_STR = """
@@ -135,5 +134,9 @@ class ConfGlobal:
 
 # Exported
 load_conf = generate_conf_loader(CONF_DEFAULT_STR, ConfGlobal)
-"""Load configuration type-safely.
+"""
+Load configuration type-safely.
+
+Args - No arguments
+Returns - Instance of ConfGlobal
 """

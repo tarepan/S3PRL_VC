@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from omegaconf import MISSING, SI
 
-from s3prlvc.config_gen import generate_conf_loader
+from .config_gen import generate_conf_loader
 
 
 @dataclass
