@@ -4,7 +4,7 @@
 from dataclasses import dataclass
 from typing import List, Tuple
 
-from torch import nn, Tensor, tanh # pylint: disable=no-name-in-module
+from torch import nn, Tensor # pylint: disable=no-name-in-module
 import torch.nn.functional as F
 
 from omegaconf import MISSING
