@@ -62,11 +62,9 @@ class Taco2Prenet(nn.Module):
             # Single layer: SegFC-ReLU-DO
             dim_i_layer = conf.dim_i if layer == 0 else conf.dim_h_o
             layers += [
-                nn.Sequential(
-                    nn.Linear(dim_i_layer, conf.dim_h_o),
-                    nn.ReLU(),
-                    AlwaysDropout(conf.dropout_rate),
-                )
+                nn.Linear(dim_i_layer, conf.dim_h_o),
+                nn.ReLU(),
+                AlwaysDropout(conf.dropout_rate),
             ]
         # Make sure at least one dropout is applied even when there is no FC layer.
         if conf.n_layers == 0:
