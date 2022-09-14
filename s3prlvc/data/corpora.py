@@ -62,19 +62,30 @@ def load_corpora(conf: ConfCorpora):
         # spk_senn = ["vcc20_SEF1", "vcc20_SEF2", "vcc20_SEM1", "vcc20_SEM2"]
         spk_seen_val = ["vcc20_SEF1", "vcc20_SEM1"]
         num_val_uttr = 10
+    elif conf.train.name == "RHN46ZND":
+        spk_unseen = ["zundamon"]
+        spk_seen_val = ["zundamon"]
+        num_val_uttr = 10
     # elif corpus_name == "AdHoc":
     #     self._sources = list(filter(lambda item_id: item_id.subtype == "s", all_utterances))
     #     self._targets = list(filter(lambda item_id: item_id.subtype == "t", all_utterances))
     else:
         raise Exception("Specified corpus do not supported in corpus split.")
-    splits = split_spk_uttr(uttrs, spk_unseen, spk_seen_val, num_val_uttr)
-    corpus_train_both = CorpusData(corpus, splits.seen_spk_seen_uttr)
-    corpus_val_seen = CorpusData(corpus, splits.seen_spk_unseen_uttr)
-    corpus_val_unseen = CorpusData(corpus, splits.unseen_spk_unseen_uttr)
+
+    # Hack
+    if conf.train.name == "RHN46ZND":
+        corpus_train_both = CorpusData(corpus, uttrs[   :-10])
+        corpus_val_seen   = CorpusData(corpus, uttrs[-10:   ])
+        corpus_val_unseen = CorpusData(corpus, uttrs[-10:   ])
+    else:
+        splits = split_spk_uttr(uttrs, spk_unseen, spk_seen_val, num_val_uttr)
+        corpus_train_both = CorpusData(corpus, splits.seen_spk_seen_uttr)
+        corpus_val_seen   = CorpusData(corpus, splits.seen_spk_unseen_uttr)
+        corpus_val_unseen = CorpusData(corpus, splits.unseen_spk_unseen_uttr)
 
     # Test
     # todo: Implement (currently, just place-holder)
-    corpus_test_seen = CorpusData(corpus_test, corpus_test.get_identities()[:10])
+    corpus_test_seen   = CorpusData(corpus_test, corpus_test.get_identities()[:10])
     corpus_test_unseen = CorpusData(corpus_test, corpus_test.get_identities()[:10])
 
     return {
