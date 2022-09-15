@@ -264,7 +264,7 @@ class Taco2ARVC(pl.LightningModule):
     #     """(PL API) Test a batch. If not provided, test_step == validation_step."""
     #     return anything_for_`test_epoch_end`
 
-    def predict_step(self, batch: Tuple[Tensor, Tensor]) -> Tuple[Tensor, int]: # pyright: ignore [reportIncompatibleMethodOverride] ; pylint: disable=arguments-differ
+    def predict_step(self, batch: Tuple[Tensor, Tensor]) -> Tuple[NDArray[np.float32], int]: # pyright: ignore [reportIncompatibleMethodOverride] ; pylint: disable=arguments-differ
         """(PL API) Generate a waveform from an unit sequence and a speaker embedding.
         Args:
             batch
