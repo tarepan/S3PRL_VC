@@ -329,21 +329,23 @@ class Taco2ARVC(pl.LightningModule):
         log_pow_ref20_minrel80 = maximum(tensor([-80.]), log_pow_ref20)
         return log_pow_ref20_minrel80 / 80.
 
-    def wavs2emb(self, waves: List[NDArray[np.float32]]) -> Tensor:
+    def wavs2emb(self, waves: List[NDArray[np.float32]], sr_src: int) -> Tensor:
         """Convert waveforms into an averaged embedding.
 
         Args:
-            waves::List[(Time,)] - waveforms, each of which can have different length
+            waves :: (Time,)[] - waveforms, each of which can have different length
+            sr_src - sampling rate of waves
         Returns:
             ave_emb::Tensor[Batch=1, Emb] - an averaged embedding
         """
 
         # Initialization at first call
         if self.uttr_encoder is None:
-            self.uttr_encoder = VoiceEncoder().to(self.device)
+            self.uttr_encoder = VoiceEncoder().to(self.device) # type: ignore
 
         # Calculate an average of utterance embeddings
-        processed_waves = [preprocess_wav(wave) for wave in waves] #type: ignore
-        ave_emb: NDArray[np.float32] = self.uttr_encoder.embed_speaker(processed_waves) #type: ignore
+        processed_waves = [preprocess_wav(wave, sr_src) for wave in waves] #type: ignore
+        uttr_embs = [self.uttr_encoder.embed_utterance(wave) for wave in processed_waves]
+        ave_emb: NDArray[np.float32] = np.mean(np.stack(uttr_embs, axis=0), axis=0).astype(np.float32)
 
         return from_numpy(ave_emb).unsqueeze(dim=0)
