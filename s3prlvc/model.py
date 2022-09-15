@@ -5,7 +5,7 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
-from torch import nn, Tensor, tensor, from_numpy, maximum, device as PTdevice # pyright: ignore [reportUnknownVariableType]; pylint: disable=no-name-in-module ; bacause of PyTorch
+from torch import nn, Tensor, tensor, from_numpy, maximum, no_grad, device as PTdevice # pyright: ignore [reportUnknownVariableType]; pylint: disable=no-name-in-module ; bacause of PyTorch
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
 import pytorch_lightning as pl
@@ -151,6 +151,7 @@ class Taco2ARVC(pl.LightningModule):
         # Vocoder for mel2wav
         # url_ckpt = "https://drive.google.com/file/d/12w1LpF6HjsJBmOUUkS6LV1d7AX18SA7u"
         # download_pretrained_model(url_ckpt, download_dir=None)
+        # todo: remove from state_dict
         self._vocoder = HiFiGAN(conf.mel2wav.path_state)
 
     # def forward(self, # pylint: disable=arguments-differ
@@ -261,17 +262,29 @@ class Taco2ARVC(pl.LightningModule):
     #     """(PL API) Test a batch. If not provided, test_step == validation_step."""
     #     return anything_for_`test_epoch_end`
 
-    def predict_step(self, batch: Tuple[Tensor, Tensor]) -> Tensor: # pyright: ignore [reportIncompatibleMethodOverride] ; pylint: disable=arguments-differ
-        """(PL API) Generate a mel-spectrogram from a unit sequence and speaker embedding.
+    def predict_step(self, batch: Tuple[Tensor, Tensor]) -> Tuple[Tensor, int]: # pyright: ignore [reportIncompatibleMethodOverride] ; pylint: disable=arguments-differ
+        """(PL API) Generate a waveform from an unit sequence and a speaker embedding.
         Args:
             batch
-                unit_series::Tensor[Batch==1, TimeUnit, Feat] - Input unit sequence
+                unit_series::Tensor[Batch==1, TimeUnit, Feat] - Input unit series
                 target_emb::Tensor[Batch==1, Emb] - Target style embedding
         Returns:
-            Tensor[Batch==1, TimeMel, Freq] - mel-spectrogram
+            wave_o::NDArray(Time,) - waveform
+            sr_o                   - Sampling rate of wave_o
         """
-        unit_series, target_emb = batch
-        return self.network(unit_series.to(self.device), target_emb.to(self.device))
+        unit_series, target_emb = batch[0].to(self.device), batch[1].to(self.device)
+        len_unit_series = tensor([unit_series.size(1)]).to(self.device)
+
+        with no_grad():
+            mspc_series_padded_predicted, len_mspc_series_predicted = self.network(unit_series, len_unit_series, target_emb)
+
+        # Assume batch==1
+        mel_padded_pred = mspc_series_padded_predicted.to("cpu").numpy()[0]
+        len_mel_pred = len_mspc_series_predicted.to("cpu").tolist()[0]
+
+        wave_o, sr_o = self._vocoder.decode(mel_spec=mel_padded_pred[:len_mel_pred], exec_spec_norm=True)
+
+        return wave_o, sr_o
 
     def configure_optimizers(self): # type: ignore ; because of PyTorch-Lightning (no return typing, so inferred as Void)
         """Set up a optimizer
