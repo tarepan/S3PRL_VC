@@ -12,6 +12,8 @@ import pytorch_lightning as pl
 from omegaconf import MISSING, SI
 from resemblyzer import preprocess_wav, VoiceEncoder # pyright: ignore [reportUnknownVariableType, reportMissingTypeStubs]; bacause of resemblyzer
 from parallel_wavegan.runners import HiFiGAN # pyright: ignore [reportMissingTypeStubs]; bacause of resemblyzeparallel_wavegan
+import s3prl.hub as hub # type: ignore
+import librosa # pyright: ignore [reportMissingTypeStubs]; bacause of librosa
 
 from .networks.taco2ar import Taco2ARNet, ConfTaco2ARNet
 from .data.dataset import Stat
@@ -328,6 +330,22 @@ class Taco2ARVC(pl.LightningModule):
         log_pow_ref20 = log_pow - 20.
         log_pow_ref20_minrel80 = maximum(tensor([-80.]), log_pow_ref20)
         return log_pow_ref20_minrel80 / 80.
+
+    def wav2unit(self, wav_path: str) -> Tensor:
+        """Convert a waveform into an unit series.
+
+        Args:
+            wav_path - Input waveform path
+        Returns:
+            unit_series :: Tensor[Batch==1, TimeUnit, Feat] - Unit series
+        """
+
+        model_unit = getattr(hub, "vq_wav2vec")().to(self.device) # type: ignore
+
+        wave: NDArray[np.float32] = librosa.load(wav_path, sr=self._conf.sr_for_unit)[0] # type: ignore ; because of librosa
+        with no_grad():
+            unit_series = model_unit([from_numpy(wave).to(self.device)])["codewords"][0]
+        return unit_series.unsqueeze(0)
 
     def wavs2emb(self, waves: List[NDArray[np.float32]], sr_src: int) -> Tensor:
         """Convert waveforms into an averaged embedding.
