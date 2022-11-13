@@ -182,28 +182,31 @@ class Taco2ARNet(nn.Module):
         for _ in range(0, len(self.lstmps)):
             c_list += [_tensor.new_zeros(batch, self._conf.dec_mainnet.dim_h)]
             z_list += [_tensor.new_zeros(batch, self._conf.dec_mainnet.dim_h)]
-        prev_out = _tensor.new_zeros(batch, self._conf.dec_mainnet.dim_o)
+        # todo: fix init for norm
+        o_prev = _tensor.new_zeros(batch, self._conf.dec_mainnet.dim_o)
 
         # step-by-step loop for autoregressive decoding
         ## local_cond::(B, hidden_dim)
         for step, local_cond in enumerate(conditioning_series.transpose(0, 1)):
-            # Single time step
-            ## RNN input (local conditioning and processed AR)
-            i_ar = self.prenet(prev_out)
-            cond_plus_ar = cat([local_cond, i_ar], dim=1)
-            ## Run single time step of all LSTMP layers
-            for i, lstmp in enumerate(self.lstmps):
-                # Run a CellLayer, then update states
-                # Input: RNN input OR lower layer's output
-                lstmp_input = cond_plus_ar if i == 0 else z_list[i-1]
-                z_list[i], c_list[i] = lstmp(lstmp_input, z_list[i], c_list[i])
-            # Projection & Stack: Stack output_t `proj(o_lstmps)` in full-time list
-            predicted_list += [self.proj(z_list[-1]).view(batch, self._dim_o, -1)]
-            # teacher-forcing if `target` else pure-autoregressive
-            prev_out = targets[step] if targets is not None else predicted_list[-1].squeeze(-1)
-            # AR spectrum is normalized (todo: could be moved up, but it change t=0 behavior)
-            prev_out = (prev_out - self.target_mean) / self.target_scale
-            # /Single time step
+            # teacher-forcing OR pure-autoregressive
+            o_prev = o_prev if step == 0 else targets[step-1] if targets is not None else predicted_list[-1].squeeze(-1)
+
+            # AR PreNet: Norm + NN
+            o_prev_norm = (o_prev - self.target_mean) / self.target_scale
+            ## () -> ()
+            ar_processed = self.prenet(o_prev_norm)
+
+            # RNN :: () -> ()
+            cond_plus_ar = cat([local_cond, ar_processed], dim=1)
+            o_rnn, state_stack = self.stack(cond_plus_ar, state_stack)
+
+            # Projection :: () -> () -> ()
+            o_proj = self.proj(o_rnn).view(batch, self._dim_o, -1)
+
+            # Stock and Rename
+            predicted_list += [o_proj]
+            o_prev = o_proj
+
         # (Batch, Freq, 1?)[] -> (Batch, Freq, Tmax) -> (Batch, Tmax, Freq)
         predicted = cat(predicted_list, dim=2).transpose(1, 2)
 

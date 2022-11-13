@@ -20,7 +20,7 @@ def test_speakers():
     assert spks == ["spk1", "spk2", "spk3"]
 
 
-def test_utterances():
+def test_utterances_of():
     """Check utterance extraction."""
     uttrs = utterances_of("spk3", utterances)
     assert uttrs != uttr_spk_2

@@ -138,3 +138,60 @@ class ExLSTMCell(nn.Module):
         new_z, new_c = self.cell(input_x, (hidden_state, cell_state))
         new_z = self.posts(new_z)
         return new_z, new_c
+
+class ExLSTMCellStack(nn.Module):
+    """Multi-layer ExLSTMCell."""
+    def __init__(self,
+        num_layer: int,
+        dim_i: int,
+        dim_h_o: int,
+        dropout: float,
+        layer_norm: bool,
+        projection: bool
+    ):
+        """
+        Args:
+            num_layer - The number of Cell layer
+            dim_i - Dimension size of stack input
+            dim_h_o - Dimension size of RNN hidden/cell state (equal to that of stack output)
+            dropout - Dropout probability
+            layer_norm - Whether to use LayerNormalization
+            projection - Whether to use non-linear projection after hidden state (LSTMP)
+        """
+        super().__init__()
+
+        # Common LSTM cell
+        self.layers = nn.ModuleList([
+            ExLSTMCell(
+                dim_i=dim_i if idx_layer == 0 else dim_h_o,
+                dim_h_o=dim_h_o,
+                dropout=dropout,
+                layer_norm=layer_norm,
+                projection=projection,
+            )
+            for idx_layer in range(num_layer)
+        ])
+
+    # Typing of PyTorch forward API is poor.
+    def forward(self, # pyright: ignore [reportIncompatibleMethodOverride]
+        in_stack: Tensor,
+        state_stack_prev: List[Tuple[Tensor, Tensor]]
+    ) -> Tuple[Tensor, List[Tuple[Tensor, Tensor]]]:
+        """Step RNNcell stack.
+        """
+
+        # [(hidden_state_layer_0, cell_state_layer_0), (hidden_state_layer_1, cell_state_layer_1), ...]
+        state_stack_new: List[Tuple[Tensor, Tensor]] = []
+
+        for idx_layer, layer in enumerate(self.layers):
+            # Input: stack input OR lower layer's output/hidden_state
+            in_layer = in_stack if idx_layer == 0 else state_stack_new[idx_layer-1][0]
+            state_layer_prev = state_stack_prev[idx_layer]
+            state_layer_new: Tuple[Tensor, Tensor] = layer(in_layer, state_layer_prev)
+            state_stack_new.append(state_layer_new)
+
+        # (Last layer's hidden state, updated state stack)
+        return state_stack_new[-1][0], state_stack_new
+
+    def generate_initial_state_stack(self) -> List[Tuple[Tensor, Tensor]]:
+        return             c_list += [_tensor.new_zeros(batch, self._conf.dec_mainnet.dim_h)]
